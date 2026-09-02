@@ -1,0 +1,13 @@
+__pycache__/
+venv/
+.venv/
+.*_cache/
+*.pyc
+.sessions/
+.tmp/
+logs/
+downloads/
+temp_raw_*.mp4
+temp_proc_*.mp4
+error_dump_*.html
+error_md_*.html
