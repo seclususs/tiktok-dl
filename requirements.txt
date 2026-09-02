@@ -2,4 +2,4 @@ beautifulsoup4==4.14.2
 playwright==1.62.0
 requests==2.32.5
 rich==15.0.0
-yt-dlp==2026.7.4
+yt-dlp==2026.8.19
