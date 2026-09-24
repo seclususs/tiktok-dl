@@ -1,11 +1,12 @@
 import logging
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urljoin
 
-from bs4 import BeautifulSoup
-from playwright.sync_api import BrowserContext
+import requests
+from bs4 import BeautifulSoup, Tag
 
 from ttdl.constants import MUSICALDOWN_MAX_RETRIES
 from ttdl.models import PhotoMetadata
@@ -20,9 +21,19 @@ class MusicalDownScraper:
 
     def _musicaldown_submit(
         self,
-        context: BrowserContext,
         post_url: str,
     ) -> str | None:
+        session = requests.Session()
+        session.headers.update(
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 Chrome/127.0.0.0 "
+                    "Safari/537.36 Edg/127.0.0.0"
+                ),
+            }
+        )
+
         for attempt in range(1, MUSICALDOWN_MAX_RETRIES + 1):
             log.info(
                 "[blue]MUSICALDOWN[/] attempt=%d/%d url=%s",
@@ -30,31 +41,41 @@ class MusicalDownScraper:
                 MUSICALDOWN_MAX_RETRIES,
                 post_url,
             )
-            page = context.new_page()
             html_content = ""
-
             try:
-                page.goto(
-                    "https://musicaldown.com/en",
-                    wait_until="domcontentloaded",
-                    timeout=30000,
-                )
-                input_loc = page.locator(
-                    "form input[type='text'], form input[type='url']"
-                ).first
-                input_loc.wait_for(state="visible", timeout=10000)
-                input_loc.fill(post_url)
-                btn = page.locator("form button[type='submit']").first
-                log.info("[magenta]MUSICALDOWN_SUBMIT[/]")
-                try:
-                    with page.expect_navigation(
-                        wait_until="domcontentloaded", timeout=15000
-                    ):
-                        btn.click(force=True)
-                except Exception:
-                    pass
+                r = session.get("https://musicaldown.com/en", timeout=15)
+                r.raise_for_status()
+                soup = BeautifulSoup(r.text, "html.parser")
+                form = soup.find("form")
+                if not isinstance(form, Tag):
+                    raise TypeError("MUSICALDOWN_REJECT Form not found")
 
-                html_content = page.content()
+                action = form.get("action")
+                if not isinstance(action, str):
+                    action = str(action) if action else ""
+
+                action_url = (
+                    f"https://musicaldown.com{action}"
+                    if action.startswith("/")
+                    else action
+                )
+
+                data = {}
+                for inp in form.find_all("input"):
+                    name = inp.get("name")
+                    if not name:
+                        continue
+                    if inp.get("type") in ["text", "url"]:
+                        data[name] = post_url
+                    else:
+                        data[name] = inp.get("value", "")
+
+                log.info("[magenta]MUSICALDOWN_SUBMIT[/]")
+                session.headers.update({"Referer": "https://musicaldown.com/en"})
+                r_post = session.post(action_url, data=data, timeout=15)
+                r_post.raise_for_status()
+
+                html_content = r_post.text
                 error_match = re.search(
                     r"M\.toast\(\{\s*html:\s*'([^']+)'",
                     html_content,
@@ -71,24 +92,19 @@ class MusicalDownScraper:
                     msg,
                 )
                 if attempt == MUSICALDOWN_MAX_RETRIES:
-                    if not html_content:
-                        html_content = page.content()
                     dump = self.logs_dir / f"error_md_{attempt}.html"
                     dump.write_text(html_content, encoding="utf-8")
                     log.info("[blue]DUMP[/] %s", dump.name)
                     raise ValueError("MUSICALDOWN_MAX_RETRIES_EXHAUSTED")
-                page.wait_for_timeout(2000)
-            finally:
-                page.close()
+                time.sleep(2)
 
         raise ValueError("MUSICALDOWN_UNREACHABLE")
 
     def fetch_musicaldown_link(
         self,
-        context: BrowserContext,
         video_url: str,
     ) -> str:
-        html_content = self._musicaldown_submit(context, video_url)
+        html_content = self._musicaldown_submit(video_url)
         if not html_content:
             raise ValueError("MUSICALDOWN_EMPTY_RESPONSE")
         if "CONVERT VIDEO NOW" in html_content.upper():
@@ -119,12 +135,11 @@ class MusicalDownScraper:
 
     def fetch_musicaldown_photos(
         self,
-        context: BrowserContext,
         post_url: str,
         post_id: str,
         create_time: int,
     ) -> list[PhotoMetadata]:
-        html_content = self._musicaldown_submit(context, post_url)
+        html_content = self._musicaldown_submit(post_url)
         if not html_content:
             raise ValueError("MUSICALDOWN_EMPTY_RESPONSE")
 

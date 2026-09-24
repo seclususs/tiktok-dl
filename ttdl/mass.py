@@ -198,14 +198,13 @@ class TikTokDownloader:
         dl: MediaDownloader,
     ):
         try:
-            dl_url = scraper.fetch_musicaldown_link(context, video.url)
+            dl_url = scraper.fetch_musicaldown_link(video.url)
             if dl_url == "__IMAGE_POST__":
                 if not do_photo:
                     log.info("[yellow]IMG_SKIP[/] %s image post", video.video_id)
                     return 0, 0, 1, 0
 
                 photos = scraper.fetch_musicaldown_photos(
-                    context,
                     video.url,
                     video.video_id,
                     video.create_time,
@@ -286,7 +285,6 @@ class TikTokDownloader:
     ):
         try:
             photos = scraper.fetch_musicaldown_photos(
-                context,
                 post_url,
                 post_id,
                 create_time,
