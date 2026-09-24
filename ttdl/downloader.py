@@ -9,23 +9,16 @@ import requests
 from playwright.sync_api import BrowserContext
 from rich.progress import Progress
 
-from ttdl.constants import (
-    DOWNLOAD_CHUNK_SIZE,
-    DOWNLOAD_MAX_RETRIES,
-    DOWNLOAD_TIMEOUT,
-    MAX_FILE_SIZE_BYTES,
-    MIN_FILE_SIZE_BYTES,
-    MIN_VIDEO_HEIGHT,
-)
-from ttdl.models import PhotoMetadata, VideoMetadata
+from ttdl.config import AppConfig
+from ttdl.models import PhotoMetadata, PostItem
 
 log = logging.getLogger(__name__)
 
 
 class MediaDownloader:
-    def __init__(self, tmp_dir: Path, output_dir: Path):
-        self.tmp_dir = tmp_dir
-        self.output_dir = output_dir
+    def __init__(self, config: AppConfig):
+        self.config = config
+        self.tmp_dir = config.tmp_dir
 
     def _download_file(
         self,
@@ -46,7 +39,9 @@ class MediaDownloader:
             "Referer": "https://musicaldown.com/",
         }
 
-        for attempt in range(1, DOWNLOAD_MAX_RETRIES + 1):
+        temp_dest = dest.with_suffix(dest.suffix + ".download")
+
+        for attempt in range(1, self.config.download_max_retries + 1):
             task_id = None
             try:
                 resp = requests.get(
@@ -54,7 +49,7 @@ class MediaDownloader:
                     stream=True,
                     headers=headers,
                     cookies=cookies,
-                    timeout=DOWNLOAD_TIMEOUT,
+                    timeout=self.config.download_timeout,
                 )
                 resp.raise_for_status()
                 total = int(resp.headers.get("content-length", "0"))
@@ -74,9 +69,9 @@ class MediaDownloader:
                 )
                 downloaded = 0
                 aborted = False
-                with open(dest, "wb") as f:
+                with open(temp_dest, "wb") as f:
                     for chunk in resp.iter_content(
-                        chunk_size=DOWNLOAD_CHUNK_SIZE,
+                        chunk_size=self.config.download_chunk_size,
                     ):
                         if chunk:
                             f.write(chunk)
@@ -94,8 +89,11 @@ class MediaDownloader:
                         downloaded // 1_000_000,
                         (max_size or 0) // 1_000_000,
                     )
+                    if temp_dest.exists():
+                        temp_dest.unlink()
                     return False
 
+                temp_dest.rename(dest)
                 return True
             except (
                 requests.exceptions.Timeout,
@@ -109,12 +107,14 @@ class MediaDownloader:
                     "[bright_yellow]DL_TIMEOUT[/] %s attempt=%d/%d err=%s",
                     label,
                     attempt,
-                    DOWNLOAD_MAX_RETRIES,
+                    self.config.download_max_retries,
                     msg,
                 )
+                if temp_dest.exists():
+                    temp_dest.unlink()
                 if dest.exists():
                     dest.unlink()
-                if attempt == DOWNLOAD_MAX_RETRIES:
+                if attempt == self.config.download_max_retries:
                     log.error(
                         "[red]DL_FAIL[/] %s max retries exhausted",
                         label,
@@ -126,7 +126,7 @@ class MediaDownloader:
     def download_and_process_video(
         self,
         context: BrowserContext,
-        metadata: VideoMetadata,
+        metadata: PostItem,
         download_url: str,
         progress: Progress,
     ) -> None:
@@ -141,13 +141,13 @@ class MediaDownloader:
                 temp_raw,
                 metadata.video_id,
                 progress,
-                max_size=MAX_FILE_SIZE_BYTES,
+                max_size=self.config.max_file_size_bytes,
             )
             if not ok:
                 return
 
             actual_size = temp_raw.stat().st_size
-            if actual_size < MIN_FILE_SIZE_BYTES:
+            if actual_size < self.config.min_file_size_bytes:
                 try:
                     temp_raw.read_text(encoding="utf-8")[:250]
                     log.warning(
@@ -215,13 +215,13 @@ class MediaDownloader:
                 )
                 return
 
-            if min(width, height) < MIN_VIDEO_HEIGHT:
+            if min(width, height) < self.config.min_video_height:
                 log.info(
                     "[yellow]RES_SKIP[/] %s res=%dx%d below %dp",
                     metadata.video_id,
                     width,
                     height,
-                    MIN_VIDEO_HEIGHT,
+                    self.config.min_video_height,
                 )
                 return
 
@@ -372,14 +372,14 @@ class MediaDownloader:
             return True
         return False
 
-    def purge_low_res(self) -> None:
+    def purge_low_res(self, output_dir: Path) -> None:
         log.info(
             "[magenta]PURGE_SCAN[/] checking existing files for sub-%dp",
-            MIN_VIDEO_HEIGHT,
+            self.config.min_video_height,
         )
         removed = 0
 
-        for mp4 in self.output_dir.glob("*.mp4"):
+        for mp4 in output_dir.glob("*.mp4"):
             try:
                 probe_out = subprocess.check_output(
                     [
@@ -404,7 +404,7 @@ class MediaDownloader:
                             width, height = int(dims_parts[0]), int(dims_parts[1])
                         except ValueError:
                             continue
-                        if min(width, height) < MIN_VIDEO_HEIGHT:
+                        if min(width, height) < self.config.min_video_height:
                             log.info(
                                 "[magenta]PURGE[/] %s res=%dx%d",
                                 mp4.name,

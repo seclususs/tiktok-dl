@@ -2,6 +2,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from ttdl.config import AppConfig
 from ttdl.live import run_dl
 from ttdl.logger import console, setup_logging
 from ttdl.mass import TikTokDownloader
@@ -73,6 +74,8 @@ def main() -> None:
                 console.print(
                     "[yellow]WARNING[/] --date argument is ignored for live downloads"
                 )
+            config = AppConfig(workspace_dir)
+            config.validate_dependencies(require_ffmpeg=True)
             sys.exit(run_dl(args.target_live, workspace_dir))
         else:
             date_filter = DateFilter.build(args.date)
@@ -87,9 +90,11 @@ def main() -> None:
                 username = args.target_photo
                 mode = "photo"
 
+            config = AppConfig(workspace_dir)
+            config.validate_dependencies(require_ffmpeg=(mode != "photo"))
             TikTokDownloader(
-                username,
-                workspace_dir=workspace_dir,
+                config=config,
+                target_username=username,
                 mode=mode,
                 date_filter=date_filter,
             ).execute()

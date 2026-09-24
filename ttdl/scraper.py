@@ -8,21 +8,28 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup, Tag
 
-from ttdl.constants import MUSICALDOWN_MAX_RETRIES
+from ttdl.config import AppConfig
 from ttdl.models import PhotoMetadata
 
 log = logging.getLogger(__name__)
 
 
 class MusicalDownScraper:
-    def __init__(self, logs_dir: Path, output_dir: Path):
-        self.logs_dir = logs_dir
+    def __init__(self, config: AppConfig, output_dir: Path):
+        self.config = config
+        self.logs_dir = config.logs_dir
         self.output_dir = output_dir
+        self._last_url = ""
+        self._last_html = ""
 
     def _musicaldown_submit(
         self,
         post_url: str,
     ) -> str | None:
+        if post_url == self._last_url and self._last_html:
+            log.info("[blue]MUSICALDOWN[/] using cached HTML for %s", post_url)
+            return self._last_html
+
         session = requests.Session()
         session.headers.update(
             {
@@ -34,11 +41,11 @@ class MusicalDownScraper:
             }
         )
 
-        for attempt in range(1, MUSICALDOWN_MAX_RETRIES + 1):
+        for attempt in range(1, self.config.musicaldown_max_retries + 1):
             log.info(
                 "[blue]MUSICALDOWN[/] attempt=%d/%d url=%s",
                 attempt,
-                MUSICALDOWN_MAX_RETRIES,
+                self.config.musicaldown_max_retries,
                 post_url,
             )
             html_content = ""
@@ -83,6 +90,8 @@ class MusicalDownScraper:
                 if error_match:
                     raise ValueError(f"MUSICALDOWN_REJECT {error_match.group(1)}")
 
+                self._last_url = post_url
+                self._last_html = html_content
                 return html_content
             except Exception as e:
                 msg = str(e).split("\n")[0][:120]
@@ -91,7 +100,7 @@ class MusicalDownScraper:
                     attempt,
                     msg,
                 )
-                if attempt == MUSICALDOWN_MAX_RETRIES:
+                if attempt == self.config.musicaldown_max_retries:
                     dump = self.logs_dir / f"error_md_{attempt}.html"
                     dump.write_text(html_content, encoding="utf-8")
                     log.info("[blue]DUMP[/] %s", dump.name)

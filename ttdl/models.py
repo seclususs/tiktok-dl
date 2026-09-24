@@ -54,13 +54,46 @@ class DateFilter:
 
 
 @dataclass
-class VideoMetadata:
+class PostItem:
     video_id: str
     url: str
     create_time: int
     datetime_obj: datetime
     target_filename: str
     output_path: Path
+    is_photo: bool
+
+    @classmethod
+    def create(
+        cls,
+        video_id: str,
+        username: str,
+        create_time: int,
+        output_dir: Path,
+        is_photo: bool = False,
+    ) -> "PostItem":
+        dt_obj = (
+            datetime.fromtimestamp(create_time, tz=timezone.utc)
+            if create_time > 0
+            else datetime.now(timezone.utc)
+        )
+        ts_str = dt_obj.strftime("%Y%m%d_%H%M%S")
+        url = f"https://www.tiktok.com/@{username}/video/{video_id}"
+
+        if is_photo:
+            filename = f"IMG_{ts_str}_{video_id}_carousel"
+        else:
+            filename = f"VID_{ts_str}_{video_id}.mp4"
+
+        return cls(
+            video_id=video_id,
+            url=url,
+            create_time=create_time,
+            datetime_obj=dt_obj,
+            target_filename=filename,
+            output_path=output_dir / filename,
+            is_photo=is_photo,
+        )
 
 
 @dataclass
@@ -73,3 +106,32 @@ class PhotoMetadata:
     datetime_obj: datetime
     target_filename: str
     output_path: Path
+
+    @classmethod
+    def create(
+        cls,
+        post_id: str,
+        slide_index: int,
+        post_url: str,
+        download_url: str,
+        create_time: int,
+        output_dir: Path,
+    ) -> "PhotoMetadata":
+        dt_obj = (
+            datetime.fromtimestamp(create_time, tz=timezone.utc)
+            if create_time > 0
+            else datetime.now(timezone.utc)
+        )
+        ts_str = dt_obj.strftime("%Y%m%d_%H%M%S")
+        filename = f"IMG_{ts_str}_{post_id}_s{slide_index}.jpg"
+
+        return cls(
+            post_id=post_id,
+            slide_index=slide_index,
+            url=post_url,
+            download_url=download_url,
+            create_time=create_time,
+            datetime_obj=dt_obj,
+            target_filename=filename,
+            output_path=output_dir / filename,
+        )

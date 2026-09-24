@@ -1,8 +1,6 @@
 import logging
-import shutil
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from playwright.sync_api import BrowserContext, sync_playwright
@@ -17,11 +15,11 @@ from rich.progress import (
 )
 
 from ttdl.browser import detect_browser
-from ttdl.constants import MAX_VIDEO_DURATION
+from ttdl.config import AppConfig
 from ttdl.downloader import MediaDownloader
 from ttdl.extractor import ProfileExtractor
 from ttdl.logger import console
-from ttdl.models import DateFilter, VideoMetadata
+from ttdl.models import DateFilter, PostItem
 from ttdl.scraper import MusicalDownScraper
 
 log = logging.getLogger(__name__)
@@ -30,38 +28,21 @@ log = logging.getLogger(__name__)
 class TikTokDownloader:
     def __init__(
         self,
+        config: AppConfig,
         target_username: str,
-        workspace_dir: Path,
         mode: str = "all",
         date_filter: DateFilter | None = None,
     ) -> None:
+        self.config = config
         self.target_username = target_username.lstrip("@")
         self.mode = mode
         self.date_filter = date_filter
-        self.workspace_dir = workspace_dir
-
-        self.browser_name, self.browser_path = detect_browser()
-        self.session_dir = self.workspace_dir / ".sessions" / self.browser_name
-        self.tmp_dir = self.workspace_dir / ".tmp"
-        self.logs_dir = self.workspace_dir / "logs"
-        self.output_dir = self.workspace_dir / "downloads" / self.target_username
-
-        self._setup_environment()
-
-    def _setup_environment(self) -> None:
+        self.browser_name, default_path = detect_browser()
+        self.browser_path = self.config.browser_executable or default_path
+        self.session_dir = self.config.session_dir / self.browser_name
         self.session_dir.mkdir(parents=True, exist_ok=True)
-        self.tmp_dir.mkdir(parents=True, exist_ok=True)
-        self.logs_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir = self.config.downloads_dir / self.target_username
         self.output_dir.mkdir(parents=True, exist_ok=True)
-
-        if self.mode in ("all", "video"):
-            for binary in ("ffmpeg", "ffprobe"):
-                if not shutil.which(binary):
-                    raise RuntimeError(f"{binary.upper()} NOT FOUND")
-
-        for pattern in ("temp_raw_*.mp4", "temp_proc_*.mp4"):
-            for tmp in self.tmp_dir.glob(pattern):
-                tmp.unlink()
 
     def _apply_date_filter(
         self,
@@ -160,8 +141,8 @@ class TikTokDownloader:
     def _build_video_list(
         self,
         posts: dict[str, dict[str, Any]],
-    ) -> list[VideoMetadata]:
-        videos: list[VideoMetadata] = []
+    ) -> list[PostItem]:
+        videos: list[PostItem] = []
         for vid_id, data in posts.items():
             author = data.get("author")
             author_str = self.target_username
@@ -171,19 +152,14 @@ class TikTokDownloader:
                 author_str = author
 
             create_time = data.get("createTime", 0)
-            dt_obj = datetime.fromtimestamp(create_time, tz=timezone.utc)
-            ts = dt_obj.strftime("%Y%m%d_%H%M%S")
-            filename = f"VID_{ts}_{vid_id}.mp4"
-
             videos.append(
-                VideoMetadata(
+                PostItem.create(
                     video_id=vid_id,
-                    url=f"https://www.tiktok.com/@{author_str}/video/{vid_id}",
+                    username=author_str,
                     create_time=create_time,
-                    datetime_obj=dt_obj,
-                    target_filename=filename,
-                    output_path=self.output_dir / filename,
-                ),
+                    output_dir=self.output_dir,
+                    is_photo=False,
+                )
             )
 
         return videos
@@ -247,12 +223,12 @@ class TikTokDownloader:
                 continue
 
             dur = video_posts.get(video.video_id, {}).get("duration", 0)
-            if dur > MAX_VIDEO_DURATION:
+            if dur > self.config.max_video_duration:
                 log.info(
                     "[yellow]DUR_SKIP[/] %s duration=%ds exceeds %ds",
                     video.video_id,
                     dur,
-                    MAX_VIDEO_DURATION,
+                    self.config.max_video_duration,
                 )
                 skipped += 1
                 continue
@@ -353,12 +329,12 @@ class TikTokDownloader:
         if self.date_filter:
             log.info("[blue]DATE_RANGE[/] %s", self.date_filter.describe())
 
-        dl = MediaDownloader(self.tmp_dir, self.output_dir)
-        scraper = MusicalDownScraper(self.logs_dir, self.output_dir)
-        extractor = ProfileExtractor(self.target_username, self.workspace_dir)
+        dl = MediaDownloader(self.config)
+        scraper = MusicalDownScraper(self.config, self.output_dir)
+        extractor = ProfileExtractor(self.target_username, self.config)
 
         if do_video:
-            dl.purge_low_res()
+            dl.purge_low_res(self.output_dir)
 
         with sync_playwright() as p:
             try:

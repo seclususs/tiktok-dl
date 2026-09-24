@@ -1,0 +1,19 @@
+﻿[scraper]
+min_video_height = 1080
+max_video_duration = 16
+scroll_wait_ms = 5000
+max_stale_scrolls = 10
+manual_wait_rounds = 60
+manual_wait_interval_ms = 5000
+musicaldown_max_retries = 3
+
+[download]
+min_file_size = "100KB"
+max_file_size = "30MB"
+timeout = 60
+chunk_size = 65536
+max_retries = 3
+
+[browser]
+# Uncomment to use a custom browser executable path
+# executable = "C:\Program Files\Google\Chrome\Application\chrome.exe"

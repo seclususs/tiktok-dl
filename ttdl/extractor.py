@@ -2,27 +2,23 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from bs4 import BeautifulSoup
 from playwright.sync_api import BrowserContext
 
 from ttdl.browser import collect_video_links, count_video_links, is_page_blocked
-from ttdl.constants import (
-    MANUAL_WAIT_INTERVAL_MS,
-    MANUAL_WAIT_ROUNDS,
-    MAX_STALE_SCROLLS,
-    SCROLL_WAIT_MS,
-)
+from ttdl.config import AppConfig
 
 log = logging.getLogger(__name__)
 
 
 class ProfileExtractor:
-    def __init__(self, target_username: str, workspace_dir: Path):
+    def __init__(self, target_username: str, config: AppConfig):
         self.target_username = target_username
-        self.workspace_dir = workspace_dir
+        self.config = config
+        self.workspace_dir = config.workspace_dir
+        self.logs_dir = config.logs_dir
 
     def _extract_video_nodes(
         self,
@@ -152,15 +148,20 @@ class ProfileExtractor:
     ) -> None:
         log.warning("[bright_yellow]WAIT[/] max 5 min for manual intervention")
 
-        for wr in range(MANUAL_WAIT_ROUNDS):
-            page.wait_for_timeout(MANUAL_WAIT_INTERVAL_MS)
+        for wr in range(self.config.manual_wait_rounds):
+            page.wait_for_timeout(self.config.manual_wait_interval_ms)
             has_links = count_video_links(page) > 0
             has_dict = allow_empty and bool(dict_ref)
             if has_links or has_dict:
                 log.info(success_msg)
                 break
             if (wr + 1) % 6 == 0:
-                log.info("[cyan]WAIT[/] %ds/300s", (wr + 1) * 5)
+                log.info(
+                    "[cyan]WAIT[/] %ds/%ds",
+                    (wr + 1) * (self.config.manual_wait_interval_ms // 1000),
+                    self.config.manual_wait_rounds
+                    * (self.config.manual_wait_interval_ms // 1000),
+                )
 
     def _scroll_and_collect(
         self,
@@ -175,7 +176,7 @@ class ProfileExtractor:
             round_num += 1
             prev = len(videos_dict)
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            page.wait_for_timeout(SCROLL_WAIT_MS)
+            page.wait_for_timeout(self.config.scroll_wait_ms)
 
             for vl in collect_video_links(page):
                 vid_id = vl["videoId"]
@@ -197,10 +198,10 @@ class ProfileExtractor:
             )
             if delta == 0:
                 stale += 1
-                if stale >= MAX_STALE_SCROLLS:
+                if stale >= self.config.max_stale_scrolls:
                     log.info(
                         "[cyan]SCROLL_DONE[/] %d stale rounds total=%d",
-                        MAX_STALE_SCROLLS,
+                        self.config.max_stale_scrolls,
                         len(videos_dict),
                     )
                     break
