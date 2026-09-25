@@ -9,13 +9,15 @@ import requests
 from bs4 import BeautifulSoup, Tag
 
 from ttdl.config import AppConfig
+from ttdl.events import Reporter
 from ttdl.models import PhotoMetadata
 
 log = logging.getLogger(__name__)
 
 
 class MusicalDownScraper:
-    def __init__(self, config: AppConfig, output_dir: Path):
+    def __init__(self, config: AppConfig, output_dir: Path, reporter: "Reporter"):
+        self.reporter = reporter
         self.config = config
         self.logs_dir = config.logs_dir
         self.output_dir = output_dir
@@ -27,7 +29,7 @@ class MusicalDownScraper:
         post_url: str,
     ) -> str | None:
         if post_url == self._last_url and self._last_html:
-            log.info("[blue]MUSICALDOWN[/] using cached HTML for %s", post_url)
+            self.reporter.info("MUSICALDOWN using cached HTML for %s", post_url)
             return self._last_html
 
         session = requests.Session()
@@ -42,8 +44,8 @@ class MusicalDownScraper:
         )
 
         for attempt in range(1, self.config.musicaldown_max_retries + 1):
-            log.info(
-                "[blue]MUSICALDOWN[/] attempt=%d/%d url=%s",
+            self.reporter.info(
+                "MUSICALDOWN attempt=%d/%d url=%s",
                 attempt,
                 self.config.musicaldown_max_retries,
                 post_url,
@@ -77,7 +79,7 @@ class MusicalDownScraper:
                     else:
                         data[name] = inp.get("value", "")
 
-                log.info("[magenta]MUSICALDOWN_SUBMIT[/]")
+                self.reporter.info("MUSICALDOWN_SUBMIT")
                 session.headers.update({"Referer": "https://musicaldown.com/en"})
                 r_post = session.post(action_url, data=data, timeout=15)
                 r_post.raise_for_status()
@@ -95,15 +97,15 @@ class MusicalDownScraper:
                 return html_content
             except Exception as e:
                 msg = str(e).split("\n")[0][:120]
-                log.warning(
-                    "[bright_yellow]MUSICALDOWN_FAIL[/] attempt=%d err=%s",
+                self.reporter.warning(
+                    "MUSICALDOWN_FAIL attempt=%d err=%s",
                     attempt,
                     msg,
                 )
                 if attempt == self.config.musicaldown_max_retries:
                     dump = self.logs_dir / f"error_md_{attempt}.html"
                     dump.write_text(html_content, encoding="utf-8")
-                    log.info("[blue]DUMP[/] %s", dump.name)
+                    self.reporter.info("DUMP %s", dump.name)
                     raise ValueError("MUSICALDOWN_MAX_RETRIES_EXHAUSTED")
                 time.sleep(2)
 
@@ -136,10 +138,10 @@ class MusicalDownScraper:
 
         for href, text in valid_links:
             if "HD" in text:
-                log.info("[green]MUSICALDOWN_OK[/] link=HD")
+                self.reporter.info("MUSICALDOWN_OK link=HD")
                 return href
 
-        log.info("[green]MUSICALDOWN_OK[/] link=%s", valid_links[0][1])
+        self.reporter.info("MUSICALDOWN_OK link=%s", valid_links[0][1])
         return valid_links[0][0]
 
     def fetch_musicaldown_photos(
@@ -154,7 +156,7 @@ class MusicalDownScraper:
 
         html_upper = html_content.upper()
         if "CONVERT VIDEO NOW" not in html_upper:
-            log.info("[yellow]VID_SKIP[/] %s video post detected", post_id)
+            self.reporter.info("VID_SKIP %s video post detected", post_id)
             return []
 
         soup = BeautifulSoup(html_content, "html.parser")
@@ -172,13 +174,13 @@ class MusicalDownScraper:
                 if src and ("tiktokcdn" in src or "p16" in src):
                     photo_links.append(src)
         if not photo_links:
-            log.warning(
-                "[bright_yellow]PHOTO_NO_LINKS[/] %s no download buttons",
+            self.reporter.warning(
+                "PHOTO_NO_LINKS %s no download buttons",
                 post_id,
             )
             return []
 
-        log.info("[blue]PHOTO_FOUND[/] %s slides=%d", post_id, len(photo_links))
+        self.reporter.info("PHOTO_FOUND %s slides=%d", post_id, len(photo_links))
 
         base_dt = datetime.fromtimestamp(create_time, tz=timezone.utc)
         photos: list[PhotoMetadata] = []

@@ -6,30 +6,27 @@ import subprocess
 from pathlib import Path
 
 import requests
-from playwright.sync_api import BrowserContext
-from rich.progress import Progress
 
 from ttdl.config import AppConfig
+from ttdl.events import Reporter
 from ttdl.models import PhotoMetadata, PostItem
 
 log = logging.getLogger(__name__)
 
 
 class MediaDownloader:
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: AppConfig, reporter: "Reporter"):
+        self.reporter = reporter
         self.config = config
         self.tmp_dir = config.tmp_dir
 
     def _download_file(
         self,
-        context: BrowserContext,
         url: str,
         dest: Path,
         label: str,
-        progress: Progress,
         max_size: int | None = None,
     ) -> bool:
-        cookies = {c["name"]: c["value"] for c in context.cookies()}
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -48,22 +45,21 @@ class MediaDownloader:
                     url,
                     stream=True,
                     headers=headers,
-                    cookies=cookies,
                     timeout=self.config.download_timeout,
                 )
                 resp.raise_for_status()
                 total = int(resp.headers.get("content-length", "0"))
                 if max_size and total > max_size:
                     resp.close()
-                    log.info(
-                        "[yellow]SIZE_SKIP[/] %s content_length=%dMB exceeds %dMB",
+                    self.reporter.info(
+                        "SIZE_SKIP %s content_length=%dMB exceeds %dMB",
                         label,
                         total // 1_000_000,
                         max_size // 1_000_000,
                     )
                     return False
 
-                task_id = progress.add_task(
+                task_id = self.reporter.add_task(
                     f"[cyan]DL {label}",
                     total=total if total > 0 else None,
                 )
@@ -76,15 +72,15 @@ class MediaDownloader:
                         if chunk:
                             f.write(chunk)
                             downloaded += len(chunk)
-                            progress.update(task_id, advance=len(chunk))
+                            self.reporter.update_task(task_id, advance=len(chunk))
                             if max_size and downloaded > max_size:
                                 aborted = True
                                 break
 
-                progress.remove_task(task_id)
+                self.reporter.remove_task(task_id)
                 if aborted:
-                    log.info(
-                        "[yellow]SIZE_SKIP[/] %s downloaded=%dMB exceeds %dMB",
+                    self.reporter.info(
+                        "SIZE_SKIP %s downloaded=%dMB exceeds %dMB",
                         label,
                         downloaded // 1_000_000,
                         (max_size or 0) // 1_000_000,
@@ -101,10 +97,10 @@ class MediaDownloader:
                 requests.exceptions.ChunkedEncodingError,
             ) as e:
                 if task_id is not None:
-                    progress.remove_task(task_id)
+                    self.reporter.remove_task(task_id)
                 msg = str(e).split("\n")[0][:80]
-                log.warning(
-                    "[bright_yellow]DL_TIMEOUT[/] %s attempt=%d/%d err=%s",
+                self.reporter.warning(
+                    "DL_TIMEOUT %s attempt=%d/%d err=%s",
                     label,
                     attempt,
                     self.config.download_max_retries,
@@ -115,8 +111,8 @@ class MediaDownloader:
                 if dest.exists():
                     dest.unlink()
                 if attempt == self.config.download_max_retries:
-                    log.error(
-                        "[red]DL_FAIL[/] %s max retries exhausted",
+                    self.reporter.error(
+                        "DL_FAIL %s max retries exhausted",
                         label,
                     )
                     return False
@@ -125,22 +121,18 @@ class MediaDownloader:
 
     def download_and_process_video(
         self,
-        context: BrowserContext,
         metadata: PostItem,
         download_url: str,
-        progress: Progress,
     ) -> None:
         temp_raw = self.tmp_dir / f"temp_raw_{metadata.video_id}.mp4"
         temp_proc = self.tmp_dir / f"temp_proc_{metadata.video_id}.mp4"
 
         try:
-            log.info("[magenta]DL_START[/] %s", metadata.video_id)
+            self.reporter.info("DL_START %s", metadata.video_id)
             ok = self._download_file(
-                context,
                 download_url,
                 temp_raw,
                 metadata.video_id,
-                progress,
                 max_size=self.config.max_file_size_bytes,
             )
             if not ok:
@@ -150,14 +142,14 @@ class MediaDownloader:
             if actual_size < self.config.min_file_size_bytes:
                 try:
                     temp_raw.read_text(encoding="utf-8")[:250]
-                    log.warning(
-                        "[bright_yellow]DL_SKIP[/] %s not_video size=%d",
+                    self.reporter.warning(
+                        "DL_SKIP %s not_video size=%d",
                         metadata.video_id,
                         actual_size,
                     )
                 except Exception:
-                    log.warning(
-                        "[bright_yellow]DL_SKIP[/] %s too_small size=%d",
+                    self.reporter.warning(
+                        "DL_SKIP %s too_small size=%d",
                         metadata.video_id,
                         actual_size,
                     )
@@ -205,19 +197,19 @@ class MediaDownloader:
                         start_time_s = -1.0
 
             except subprocess.CalledProcessError:
-                log.error("[red]PROBE_FAIL[/] %s corrupt file", metadata.video_id)
+                self.reporter.error("PROBE_FAIL %s corrupt file", metadata.video_id)
                 return
             except (json.JSONDecodeError, IndexError, ValueError, TypeError) as e:
-                log.warning(
-                    "[bright_yellow]PROBE_SKIP[/] %s unparseable stream info: %s",
+                self.reporter.warning(
+                    "PROBE_SKIP %s unparseable stream info: %s",
                     metadata.video_id,
                     str(e),
                 )
                 return
 
             if min(width, height) < self.config.min_video_height:
-                log.info(
-                    "[yellow]RES_SKIP[/] %s res=%dx%d below %dp",
+                self.reporter.info(
+                    "RES_SKIP %s res=%dx%d below %dp",
                     metadata.video_id,
                     width,
                     height,
@@ -231,14 +223,14 @@ class MediaDownloader:
             is_shifted = (start_time_s < 0.0) or (start_time_s >= 0.110)
 
             if not is_shifted:
-                log.info(
-                    "[magenta]METADATA[/] %s res=%dx%d start_time=%.3f",
+                self.reporter.info(
+                    "METADATA %s res=%dx%d start_time=%.3f",
                     metadata.target_filename,
                     width,
                     height,
                     start_time_s,
                 )
-                task_id = progress.add_task(
+                task_id = self.reporter.add_task(
                     f"[magenta]METADATA {metadata.video_id}", total=duration_us
                 )
                 proc = subprocess.Popen(
@@ -261,14 +253,14 @@ class MediaDownloader:
                     universal_newlines=True,
                 )
             else:
-                log.info(
-                    "[magenta]ENCODE[/] %s res=%dx%d start_time=%.3f -> HEVC",
+                self.reporter.info(
+                    "ENCODE %s res=%dx%d start_time=%.3f -> HEVC",
                     metadata.target_filename,
                     width,
                     height,
                     start_time_s,
                 )
-                task_id = progress.add_task(
+                task_id = self.reporter.add_task(
                     f"[magenta]ENCODE {metadata.video_id}", total=duration_us
                 )
                 proc = subprocess.Popen(
@@ -311,12 +303,12 @@ class MediaDownloader:
                                 if duration_us and us > duration_us:
                                     us = duration_us
                                 if us >= 0:
-                                    progress.update(task_id, completed=us)
+                                    self.reporter.update_task(task_id, completed=us)
                         except ValueError:
                             pass
 
             proc.wait()
-            progress.remove_task(task_id)
+            self.reporter.remove_task(task_id)
             if proc.returncode != 0:
                 raise subprocess.CalledProcessError(proc.returncode, proc.args)
 
@@ -326,12 +318,12 @@ class MediaDownloader:
                 str(metadata.output_path),
                 (metadata.create_time, metadata.create_time),
             )
-            log.info("[green]DONE[/] %s", metadata.target_filename)
+            self.reporter.info("DONE %s", metadata.target_filename)
         except subprocess.CalledProcessError:
-            log.error("[red]FFMPEG_FAIL[/] %s", metadata.video_id)
+            self.reporter.error("FFMPEG_FAIL %s", metadata.video_id)
         except Exception as e:
-            log.error(
-                "[red]DL_ERR[/] %s %s",
+            self.reporter.error(
+                "DL_ERR %s %s",
                 metadata.video_id,
                 str(e).split("\n")[0][:120],
             )
@@ -343,24 +335,20 @@ class MediaDownloader:
 
     def download_photo(
         self,
-        context: BrowserContext,
         photo: PhotoMetadata,
-        progress: Progress,
     ) -> bool:
         if photo.output_path.exists():
             return False
 
-        log.info(
-            "[magenta]DL_PHOTO[/] %s slide=%d",
+        self.reporter.info(
+            "DL_PHOTO %s slide=%d",
             photo.post_id,
             photo.slide_index,
         )
         ok = self._download_file(
-            context,
             photo.download_url,
             photo.output_path,
             f"{photo.post_id}_s{photo.slide_index}",
-            progress,
         )
 
         if ok and photo.output_path.exists():
@@ -368,13 +356,13 @@ class MediaDownloader:
                 str(photo.output_path),
                 (photo.create_time, photo.create_time),
             )
-            log.info("[green]DONE[/] %s", photo.target_filename)
+            self.reporter.info("DONE %s", photo.target_filename)
             return True
         return False
 
     def purge_low_res(self, output_dir: Path) -> None:
-        log.info(
-            "[magenta]PURGE_SCAN[/] checking existing files for sub-%dp",
+        self.reporter.info(
+            "PURGE_SCAN checking existing files for sub-%dp",
             self.config.min_video_height,
         )
         removed = 0
@@ -405,8 +393,8 @@ class MediaDownloader:
                         except ValueError:
                             continue
                         if min(width, height) < self.config.min_video_height:
-                            log.info(
-                                "[magenta]PURGE[/] %s res=%dx%d",
+                            self.reporter.info(
+                                "PURGE %s res=%dx%d",
                                 mp4.name,
                                 width,
                                 height,
@@ -416,4 +404,4 @@ class MediaDownloader:
             except Exception:
                 pass
 
-        log.info("[green]PURGE_DONE[/] removed=%d", removed)
+        self.reporter.info("PURGE_DONE removed=%d", removed)

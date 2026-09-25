@@ -3,14 +3,20 @@ import sys
 from pathlib import Path
 
 from ttdl.config import AppConfig
-from ttdl.live import run_dl
-from ttdl.logger import console, setup_logging
+from ttdl.direct import DirectDownloader
+from ttdl.live import LiveDownloader
+from ttdl.logger import setup_logging
 from ttdl.mass import TikTokDownloader
 from ttdl.models import DateFilter
+from ttdl.reporter import CliReporter
 
 
 def main() -> None:
-    setup_logging()
+    workspace_dir = Path(__file__).resolve().parent
+    config = AppConfig(workspace_dir)
+    is_live = "-tl" in sys.argv or "--target-live" in sys.argv
+    reporter = CliReporter(mode="live" if is_live else "mass")
+    setup_logging(config.logs_dir)
 
     parser = argparse.ArgumentParser(
         description="TikTok Downloader",
@@ -19,6 +25,13 @@ def main() -> None:
         ),
     )
     group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument(
+        "-dl",
+        "--direct-link",
+        type=str,
+        metavar="URL",
+        help="Download directly from a TikTok URL. \nExample: -dl https://vt.tiktok.com/",
+    )
     group.add_argument(
         "-tm",
         "--target-mass",
@@ -66,17 +79,18 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    workspace_dir = Path(__file__).resolve().parent
-
     try:
-        if args.target_live:
+        if args.direct_link:
             if args.date:
-                console.print(
-                    "[yellow]WARNING[/] --date argument is ignored for live downloads"
-                )
-            config = AppConfig(workspace_dir)
+                reporter.warning("--date argument is ignored for direct link downloads")
+            sys.exit(DirectDownloader(config, reporter, args.direct_link).execute())
+        elif args.target_live:
+            if args.date:
+                reporter.warning("--date argument is ignored for live downloads")
+
+            reporter.mode = "live"
             config.validate_dependencies(require_ffmpeg=True)
-            sys.exit(run_dl(args.target_live, workspace_dir))
+            sys.exit(LiveDownloader(args.target_live, config, reporter).execute())
         else:
             date_filter = DateFilter.build(args.date)
 
@@ -90,29 +104,27 @@ def main() -> None:
                 username = args.target_photo
                 mode = "photo"
 
-            config = AppConfig(workspace_dir)
             config.validate_dependencies(require_ffmpeg=(mode != "photo"))
-            TikTokDownloader(
-                config=config,
-                target_username=username,
-                mode=mode,
-                date_filter=date_filter,
-            ).execute()
+            sys.exit(
+                TikTokDownloader(
+                    target_username=username,
+                    config=config,
+                    reporter=reporter,
+                    date_filter=date_filter,
+                    mode=mode,
+                ).execute()
+            )
     except ValueError as ve:
-        if "Invalid date format" in str(ve):
-            console.print(f"[bold red]FATAL[/] {ve}")
-            sys.exit(1)
-        raise
+        reporter.error(f"FATAL {ve}")
+        sys.exit(1)
     except RuntimeError as re:
-        if "NO BROWSER FOUND" in str(re):
-            console.print(f"[FATAL] {re}", style="bold red")
-            sys.exit(1)
-        raise
+        reporter.error(f"FATAL {re}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        console.print("\n[bold bright_yellow]INTERRUPT[/] execution aborted by user")
+        print("\nINTERRUPT execution aborted by user")
         sys.exit(130)

@@ -9,60 +9,19 @@ from playwright.sync_api import BrowserContext
 
 from ttdl.browser import collect_video_links, count_video_links, is_page_blocked
 from ttdl.config import AppConfig
+from ttdl.events import Reporter
+from ttdl.utils import extract_video_nodes
 
 log = logging.getLogger(__name__)
 
 
 class ProfileExtractor:
-    def __init__(self, target_username: str, config: AppConfig):
+    def __init__(self, target_username: str, config: AppConfig, reporter: "Reporter"):
+        self.reporter = reporter
         self.target_username = target_username
         self.config = config
         self.workspace_dir = config.workspace_dir
         self.logs_dir = config.logs_dir
-
-    def _extract_video_nodes(
-        self,
-        node: Any,
-        collection: dict[str, dict[str, Any]],
-    ) -> None:
-        if isinstance(node, list):
-            for item in node:
-                self._extract_video_nodes(item, collection)
-            return
-
-        if not isinstance(node, dict):
-            return
-
-        vid_id = str(node.get("id", node.get("item_id", node.get("video_id", ""))))
-        if vid_id.isdigit() and len(vid_id) >= 15:
-            c_time = node.get("createTime") or node.get("create_time")
-            if c_time and ("video" in node or "imagePost" in node):
-                post_type = "photo" if "imagePost" in node else "video"
-                duration = 0
-                vid_data = node.get("video")
-                if isinstance(vid_data, dict):
-                    duration = int(vid_data.get("duration", 0))
-
-                try:
-                    c_time_int = int(c_time)
-                    if vid_id in collection:
-                        collection[vid_id]["createTime"] = c_time_int
-                        collection[vid_id]["post_type"] = post_type
-                        collection[vid_id]["duration"] = duration
-                        if "author" in node:
-                            collection[vid_id]["author"] = node["author"]
-                    else:
-                        collection[vid_id] = {
-                            "id": vid_id,
-                            "createTime": c_time_int,
-                            "author": node.get("author"),
-                            "post_type": post_type,
-                            "duration": duration,
-                        }
-                except ValueError:
-                    pass
-        for value in node.values():
-            self._extract_video_nodes(value, collection)
 
     def _handle_api_response(
         self,
@@ -131,8 +90,8 @@ class ProfileExtractor:
                         "duration": duration,
                     }
 
-            log.info(
-                "[blue]API_INTERCEPT[/] +%d total=%d",
+            self.reporter.info(
+                "API_INTERCEPT +%d total=%d",
                 len(items),
                 len(videos_dict),
             )
@@ -146,18 +105,18 @@ class ProfileExtractor:
         allow_empty: bool = False,
         dict_ref: dict | None = None,
     ) -> None:
-        log.warning("[bright_yellow]WAIT[/] max 5 min for manual intervention")
+        self.reporter.warning("WAIT max 5 min for manual intervention")
 
         for wr in range(self.config.manual_wait_rounds):
             page.wait_for_timeout(self.config.manual_wait_interval_ms)
             has_links = count_video_links(page) > 0
             has_dict = allow_empty and bool(dict_ref)
             if has_links or has_dict:
-                log.info(success_msg)
+                self.reporter.info(success_msg)
                 break
             if (wr + 1) % 6 == 0:
-                log.info(
-                    "[cyan]WAIT[/] %ds/%ds",
+                self.reporter.info(
+                    "WAIT %ds/%ds",
                     (wr + 1) * (self.config.manual_wait_interval_ms // 1000),
                     self.config.manual_wait_rounds
                     * (self.config.manual_wait_interval_ms // 1000),
@@ -168,7 +127,7 @@ class ProfileExtractor:
         page: Any,
         videos_dict: dict[str, dict[str, Any]],
     ) -> None:
-        log.info("[cyan]SCROLL_START[/] collecting video grid")
+        self.reporter.info("SCROLL_START collecting video grid")
         stale = 0
         round_num = 0
 
@@ -190,8 +149,8 @@ class ProfileExtractor:
                     }
 
             delta = len(videos_dict) - prev
-            log.info(
-                "[cyan]SCROLL[/] round=%d new=%d total=%d",
+            self.reporter.info(
+                "SCROLL round=%d new=%d total=%d",
                 round_num,
                 delta,
                 len(videos_dict),
@@ -199,8 +158,8 @@ class ProfileExtractor:
             if delta == 0:
                 stale += 1
                 if stale >= self.config.max_stale_scrolls:
-                    log.info(
-                        "[cyan]SCROLL_DONE[/] %d stale rounds total=%d",
+                    self.reporter.info(
+                        "SCROLL_DONE %d stale rounds total=%d",
                         self.config.max_stale_scrolls,
                         len(videos_dict),
                     )
@@ -216,7 +175,7 @@ class ProfileExtractor:
         soup = BeautifulSoup(html_content, "html.parser")
 
         if not videos_dict:
-            log.info("[blue]FALLBACK[/] static HTML parse")
+            self.reporter.info("FALLBACK static HTML parse")
             for a_tag in soup.find_all("a", href=True):
                 match = re.search(r"/@([^/]+)/video/(\d+)", a_tag["href"])
                 if match:
@@ -237,7 +196,7 @@ class ProfileExtractor:
             script_text = getattr(script_tag, "string", None)
             if script_text:
                 try:
-                    self._extract_video_nodes(
+                    extract_video_nodes(
                         json.loads(script_text.strip()),
                         videos_dict,
                     )
@@ -248,7 +207,7 @@ class ProfileExtractor:
         self,
         context: BrowserContext,
     ) -> dict[str, dict[str, Any]]:
-        log.info("[blue]EXTRACT_INIT[/] target=%s", self.target_username)
+        self.reporter.info("EXTRACT_INIT target=%s", self.target_username)
         page = context.pages[0] if context.pages else context.new_page()
         profile_url = f"https://www.tiktok.com/@{self.target_username}"
         videos_dict: dict[str, dict[str, Any]] = {}
@@ -260,7 +219,7 @@ class ProfileExtractor:
         )
 
         try:
-            log.info("[cyan]NAV[/] %s", profile_url)
+            self.reporter.info("NAV %s", profile_url)
             try:
                 page.goto(
                     profile_url,
@@ -268,27 +227,27 @@ class ProfileExtractor:
                     timeout=90000,
                 )
             except Exception as e:
-                log.warning(
-                    "[bright_yellow]NAV_WARN[/] %s",
+                self.reporter.warning(
+                    "NAV_WARN %s",
                     str(e).split("\n")[0][:120],
                 )
             page.wait_for_timeout(3000)
 
             if is_page_blocked(page):
-                log.warning("[bright_yellow]BLOCKED[/] 403/captcha detected")
-                log.warning(
-                    "[bright_yellow]ACTION[/] navigate to %s in Edge manually",
+                self.reporter.warning("BLOCKED 403/captcha detected")
+                self.reporter.warning(
+                    "ACTION navigate to %s in your browser manually",
                     profile_url,
                 )
-                log.warning(
-                    "[bright_yellow]ACTION[/] complete captcha/login ensure videos visible"
+                self.reporter.warning(
+                    "ACTION complete captcha/login ensure videos visible"
                 )
                 self._wait_for_manual_intervention(
                     page,
-                    "[green]UNBLOCKED[/] videos detected after intervention",
+                    "[green]UNBLOCKED videos detected after intervention",
                 )
 
-            log.info("[cyan]WAIT_SHELL[/] user profile elements")
+            self.reporter.info("WAIT_SHELL user profile elements")
             try:
                 page.wait_for_selector(
                     '[data-e2e="user-page"], [data-e2e="user-title"], script#__UNIVERSAL_DATA_FOR_REHYDRATION__',
@@ -296,19 +255,19 @@ class ProfileExtractor:
                     timeout=30000,
                 )
             except Exception:
-                log.info("[cyan]SHELL_TIMEOUT[/] proceeding")
+                self.reporter.info("SHELL_TIMEOUT proceeding")
 
-            log.info("[cyan]CLICK_TAB[/] videos")
+            self.reporter.info("CLICK_TAB videos")
             try:
                 tab = page.locator('[data-e2e="videos-tab"]')
                 if tab.count() > 0:
                     tab.first.click(force=True)
-                    log.info("[green]TAB_CLICKED[/] videos")
+                    self.reporter.info("TAB_CLICKED videos")
                     page.wait_for_timeout(3000)
             except Exception:
                 pass
 
-            log.info("[cyan]WAIT_ITEMS[/] video links in DOM")
+            self.reporter.info("WAIT_ITEMS video links in DOM")
             if count_video_links(page) == 0:
                 try:
                     page.wait_for_selector(
@@ -317,23 +276,21 @@ class ProfileExtractor:
                         timeout=30000,
                     )
                 except Exception:
-                    log.warning(
-                        "[bright_yellow]ITEMS_TIMEOUT[/] no video links after 30s"
-                    )
+                    self.reporter.warning("ITEMS_TIMEOUT no video links after 30s")
                     page.evaluate("window.scrollTo(0, 500)")
                     page.wait_for_timeout(3000)
                     page.evaluate("window.scrollTo(0, 0)")
                     page.wait_for_timeout(3000)
 
             if count_video_links(page) == 0 and not videos_dict:
-                log.warning("[bright_yellow]EMPTY_GRID[/] likely requires TikTok login")
-                log.warning(
-                    "[bright_yellow]ACTION[/] login in Edge open %s",
+                self.reporter.warning("EMPTY_GRID likely requires TikTok login")
+                self.reporter.warning(
+                    "ACTION login in your browser open %s",
                     profile_url,
                 )
                 self._wait_for_manual_intervention(
                     page,
-                    "[green]RESOLVED[/] videos detected",
+                    "[green]RESOLVED videos detected",
                     allow_empty=True,
                     dict_ref=videos_dict,
                 )
@@ -342,16 +299,16 @@ class ProfileExtractor:
             self._scroll_and_collect(page, videos_dict)
             html_content = page.content()
         except Exception as e:
-            log.error("[red]BROWSER_FAIL[/] %s", str(e).split("\n")[0][:120])
+            self.reporter.error("BROWSER_FAIL %s", str(e).split("\n")[0][:120])
             raise RuntimeError(f"Browser extraction failed: {e}")
 
         self._enrich_from_html(html_content, videos_dict)
         if not videos_dict:
             dump = self.workspace_dir / f"error_dump_{self.target_username}.html"
             dump.write_text(html_content, encoding="utf-8")
-            log.error("[red]ZERO_POSTS[/] profile empty or blocked")
-            log.error("[red]DUMP[/] %s", dump.name)
+            self.reporter.error("ZERO_POSTS profile empty or blocked")
+            self.reporter.error("DUMP %s", dump.name)
             raise RuntimeError("Profile empty or blocked")
 
-        log.info("[blue]EXTRACT_DONE[/] found=%d", len(videos_dict))
+        self.reporter.info("EXTRACT_DONE found=%d", len(videos_dict))
         return videos_dict

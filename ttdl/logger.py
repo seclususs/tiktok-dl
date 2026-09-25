@@ -1,23 +1,19 @@
 import logging
-
-from rich.console import Console
-from rich.logging import RichHandler
-
-console = Console()
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 
-def setup_logging() -> None:
+def setup_logging(logs_dir: Path) -> None:
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_file = logs_dir / "ttdl.log"
+
     logging.basicConfig(
         level=logging.INFO,
-        format="%(message)s",
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="[%X]",
         handlers=[
-            RichHandler(
-                console=console,
-                rich_tracebacks=True,
-                show_path=False,
-                show_level=True,
-                markup=True,
+            RotatingFileHandler(
+                log_file, maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8"
             )
         ],
     )
