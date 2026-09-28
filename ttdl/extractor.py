@@ -73,6 +73,8 @@ class ProfileExtractor:
                     duration = int(vid_data.get("duration", 0))
 
                 c_time_int = int(c_time) if c_time else 0
+                if not c_time_int and vid_id.isdigit():
+                    c_time_int = int(vid_id) >> 32
 
                 if vid_id in videos_dict:
                     if c_time_int:
@@ -143,7 +145,11 @@ class ProfileExtractor:
                     videos_dict[vid_id] = {
                         "id": vid_id,
                         "author": vl["author"],
-                        "createTime": int(datetime.now(timezone.utc).timestamp()),
+                        "createTime": (
+                            int(vid_id) >> 32
+                            if vid_id.isdigit()
+                            else int(datetime.now(timezone.utc).timestamp())
+                        ),
                         "post_type": None,
                         "duration": 0,
                     }
@@ -184,7 +190,11 @@ class ProfileExtractor:
                         videos_dict[vid_id] = {
                             "id": vid_id,
                             "author": match.group(1),
-                            "createTime": int(datetime.now(timezone.utc).timestamp()),
+                            "createTime": (
+                                int(vid_id) >> 32
+                                if vid_id.isdigit()
+                                else int(datetime.now(timezone.utc).timestamp())
+                            ),
                             "post_type": None,
                             "duration": 0,
                         }

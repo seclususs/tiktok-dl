@@ -16,7 +16,11 @@ def extract_video_nodes(
     vid_id = str(node.get("id", node.get("item_id", node.get("video_id", ""))))
     if vid_id.isdigit() and len(vid_id) >= 15:
         c_time = node.get("createTime") or node.get("create_time")
-        if c_time and ("video" in node or "imagePost" in node):
+        c_time_int = int(c_time) if c_time else 0
+        if not c_time_int and vid_id.isdigit():
+            c_time_int = int(vid_id) >> 32
+
+        if c_time_int and ("video" in node or "imagePost" in node):
             post_type = "photo" if "imagePost" in node else "video"
             duration = 0
             vid_data = node.get("video")
@@ -24,7 +28,6 @@ def extract_video_nodes(
                 duration = int(vid_data.get("duration", 0))
 
             try:
-                c_time_int = int(c_time)
                 if vid_id in collection:
                     collection[vid_id]["createTime"] = c_time_int
                     collection[vid_id]["post_type"] = post_type

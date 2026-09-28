@@ -62,6 +62,9 @@ class UrlResolver:
             create_time = collection[video_id].get("createTime", 0)
             post_type = collection[video_id].get("post_type", "video")
 
+        if not create_time and video_id.isdigit():
+            create_time = int(video_id) >> 32
+
         return {
             "video_id": video_id,
             "username": username,

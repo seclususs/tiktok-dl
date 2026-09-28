@@ -5,6 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import piexif
 import requests
 
 from ttdl.config import AppConfig
@@ -352,6 +353,23 @@ class MediaDownloader:
         )
 
         if ok and photo.output_path.exists():
+            try:
+                exif_dict = piexif.load(str(photo.output_path))
+                local_dt = photo.datetime_obj.astimezone()
+                exif_time = local_dt.strftime("%Y:%m:%d %H:%M:%S")
+
+                exif_dict["Exif"][piexif.ExifIFD.DateTimeOriginal] = exif_time.encode(
+                    "utf-8"
+                )
+                exif_dict["Exif"][piexif.ExifIFD.DateTimeDigitized] = exif_time.encode(
+                    "utf-8"
+                )
+                exif_dict["0th"][piexif.ImageIFD.DateTime] = exif_time.encode("utf-8")
+
+                exif_bytes = piexif.dump(exif_dict)
+                piexif.insert(exif_bytes, str(photo.output_path))
+            except Exception as e:
+                self.reporter.warning("EXIF_INJECT_FAIL %s", e)
             os.utime(
                 str(photo.output_path),
                 (photo.create_time, photo.create_time),
