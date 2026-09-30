@@ -16,12 +16,24 @@ log = logging.getLogger(__name__)
 
 
 class ProfileExtractor:
-    def __init__(self, target_username: str, config: AppConfig, reporter: "Reporter"):
+    def __init__(
+        self,
+        target_username: str,
+        config: AppConfig,
+        reporter: "Reporter",
+        usejson: bool = False,
+        force: bool = False,
+    ):
         self.reporter = reporter
         self.target_username = target_username
         self.config = config
         self.workspace_dir = config.workspace_dir
         self.logs_dir = config.logs_dir
+        self.usejson = usejson
+        self.force = force
+        self.json_dir = self.config.tmp_dir / "json"
+        self.json_dir.mkdir(parents=True, exist_ok=True)
+        self.json_path = self.json_dir / f"{self.target_username}.json"
 
     def _handle_api_response(
         self,
@@ -128,6 +140,7 @@ class ProfileExtractor:
         self,
         page: Any,
         videos_dict: dict[str, dict[str, Any]],
+        cached_ids: set[str],
     ) -> None:
         self.reporter.info("SCROLL_START collecting video grid")
         stale = 0
@@ -138,6 +151,9 @@ class ProfileExtractor:
             prev = len(videos_dict)
             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
             page.wait_for_timeout(self.config.scroll_wait_ms)
+
+            consecutive_known = 0
+            smart_stop_triggered = False
 
             for vl in collect_video_links(page):
                 vid_id = vl["videoId"]
@@ -153,6 +169,21 @@ class ProfileExtractor:
                         "post_type": None,
                         "duration": 0,
                     }
+                    if not self.force:
+                        consecutive_known = 0
+                elif vid_id in cached_ids:
+                    if not self.force:
+                        consecutive_known += 1
+                        if consecutive_known >= 5:
+                            smart_stop_triggered = True
+                            break
+                else:
+                    if not self.force:
+                        consecutive_known = 0
+
+            if smart_stop_triggered:
+                self.reporter.info("SCROLL_STOP consecutive known videos detected")
+                break
 
             delta = len(videos_dict) - prev
             self.reporter.info(
@@ -215,12 +246,30 @@ class ProfileExtractor:
 
     def extract_profile_posts(
         self,
-        context: BrowserContext,
+        context: BrowserContext | None,
     ) -> dict[str, dict[str, Any]]:
         self.reporter.info("EXTRACT_INIT target=%s", self.target_username)
+        videos_dict: dict[str, dict[str, Any]] = {}
+        cached_ids: set[str] = set()
+
+        if self.json_path.exists():
+            try:
+                with open(self.json_path, "r", encoding="utf-8") as f:
+                    videos_dict = json.load(f)
+                cached_ids = set(videos_dict.keys())
+                self.reporter.info("CACHE_LOAD found %d posts", len(videos_dict))
+            except Exception as e:
+                self.reporter.error("CACHE_FAIL %s", str(e))
+                videos_dict = {}
+
+        if self.usejson:
+            return videos_dict
+
+        if context is None:
+            raise RuntimeError("BrowserContext is None but usejson is False")
+
         page = context.pages[0] if context.pages else context.new_page()
         profile_url = f"https://www.tiktok.com/@{self.target_username}"
-        videos_dict: dict[str, dict[str, Any]] = {}
         html_content = ""
 
         page.on(
@@ -306,7 +355,7 @@ class ProfileExtractor:
                 )
 
             page.wait_for_timeout(3000)
-            self._scroll_and_collect(page, videos_dict)
+            self._scroll_and_collect(page, videos_dict, cached_ids)
             html_content = page.content()
         except Exception as e:
             self.reporter.error("BROWSER_FAIL %s", str(e).split("\n")[0][:120])
@@ -319,6 +368,12 @@ class ProfileExtractor:
             self.reporter.error("ZERO_POSTS profile empty or blocked")
             self.reporter.error("DUMP %s", dump.name)
             raise RuntimeError("Profile empty or blocked")
+
+        try:
+            with open(self.json_path, "w", encoding="utf-8") as f:
+                json.dump(videos_dict, f, indent=4)
+        except Exception as e:
+            self.reporter.error("CACHE_SAVE_FAIL %s", str(e))
 
         self.reporter.info("EXTRACT_DONE found=%d", len(videos_dict))
         return videos_dict

@@ -1,14 +1,28 @@
 import argparse
+import logging
+import os
 import sys
 from pathlib import Path
 
-from ttdl.config import AppConfig
-from ttdl.direct import DirectDownloader
-from ttdl.live import LiveDownloader
-from ttdl.logger import setup_logging
-from ttdl.mass import TikTokDownloader
-from ttdl.models import DateFilter
-from ttdl.reporter import CliReporter
+if "com.termux" in os.environ.get("PREFIX", ""):
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    from ttdl.termux import setup_termux
+
+    setup_termux()
+
+try:
+    from ttdl.config import AppConfig
+    from ttdl.direct import DirectDownloader
+    from ttdl.live import LiveDownloader
+    from ttdl.logger import setup_logging
+    from ttdl.mass import TikTokDownloader
+    from ttdl.models import DateFilter
+    from ttdl.reporter import CliReporter
+except ImportError as e:
+    print(f"\nMissing dependency '{e.name}'.")
+    print("Please install requirements first by running:")
+    print("pip install -r requirements.txt\n")
+    sys.exit(1)
 
 
 def main() -> None:
@@ -77,6 +91,25 @@ def main() -> None:
         ),
     )
 
+    parser.add_argument(
+        "-jo",
+        "--jsononly",
+        action="store_true",
+        help="Scrape and update JSON cache only, do not download media.",
+    )
+    parser.add_argument(
+        "-uj",
+        "--usejson",
+        action="store_true",
+        help="Skip browser scraping, load from JSON cache and download directly.",
+    )
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Force full profile scrape, ignoring the smart stop condition.",
+    )
+
     args = parser.parse_args()
 
     try:
@@ -112,6 +145,9 @@ def main() -> None:
                     reporter=reporter,
                     date_filter=date_filter,
                     mode=mode,
+                    jsononly=args.jsononly,
+                    usejson=args.usejson,
+                    force=args.force,
                 ).execute()
             )
     except ValueError as ve:
