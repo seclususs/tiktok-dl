@@ -120,7 +120,15 @@ class TikTokDownloader:
                 raise
 
             context = browser.contexts[0]
-            page = context.pages[0] if context.pages else context.new_page()
+            if context.pages:
+                page = context.pages[0]
+                for tab in context.pages[1:]:
+                    try:
+                        tab.close()
+                    except Exception:
+                        pass
+            else:
+                page = context.new_page()
 
             client = context.new_cdp_session(page)
             client.send(
