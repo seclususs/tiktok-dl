@@ -36,8 +36,14 @@ class TikTokDownloader:
         self.jsononly = jsononly
         self.usejson = usejson
         self.force = force
-        self.browser_name, default_path = detect_browser()
-        self.browser_path = self.config.browser_executable or default_path
+
+        if is_termux():
+            self.browser_name = "termux_cdp"
+            self.browser_path = ""
+        else:
+            self.browser_name, default_path = detect_browser()
+            self.browser_path = self.config.browser_executable or default_path
+
         self.session_dir = self.config.session_dir / self.browser_name
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir = self.config.downloads_dir / self.target_username
