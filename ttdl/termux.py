@@ -26,9 +26,18 @@ def setup_termux() -> None:
         sys.exit(1)
 
     try:
-        import playwright
+        import importlib.util
 
-        installed_version = getattr(playwright, "__version__", "")
+        if importlib.util.find_spec("playwright") is None:
+            raise ImportError("Playwright not installed")
+
+        try:
+            from importlib.metadata import version
+
+            installed_version = version("playwright")
+        except Exception:
+            installed_version = ""
+
         req_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "requirements.txt",
@@ -78,7 +87,7 @@ def setup_termux() -> None:
                 log.error("Could not find Playwright manylinux1_x86_64 wheel.")
                 sys.exit(1)
 
-            whl_name = "playwright-any.whl"
+            whl_name = f"playwright-{version_to_fetch}-py3-none-any.whl"
             log.info("PLAYWRIGHT_INSTALL downloading %s...", target_url)
             urllib.request.urlretrieve(target_url, whl_name)
             log.info("PLAYWRIGHT_INSTALL running pip install...")
