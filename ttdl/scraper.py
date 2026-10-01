@@ -122,10 +122,10 @@ class MusicalDownScraper:
             return "__IMAGE_POST__"
 
         soup = BeautifulSoup(html_content, "html.parser")
-        valid_links = []
+        valid_links: list[tuple[str, str]] = []
         for link in soup.find_all("a", href=True):
-            href = link.get("href", "")
-            text = link.get_text(strip=True).upper()
+            href = str(link.get("href", ""))
+            text = str(link.get_text(strip=True)).upper()
             if href and "MP4" in text:
                 valid_links.append(
                     (

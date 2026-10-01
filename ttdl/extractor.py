@@ -117,7 +117,7 @@ class ProfileExtractor:
         page: Any,
         success_msg: str,
         allow_empty: bool = False,
-        dict_ref: dict | None = None,
+        dict_ref: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self.reporter.warning("WAIT max 5 min for manual intervention")
 

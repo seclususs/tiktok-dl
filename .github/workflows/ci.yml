@@ -32,7 +32,7 @@ jobs:
 
       - name: Static type checking
         run: |
-          mypy ttdl main.py --ignore-missing-imports
+          mypy ttdl main.py --strict --ignore-missing-imports
 
   cli-test:
     name: CLI Test

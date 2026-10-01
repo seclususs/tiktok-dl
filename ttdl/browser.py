@@ -1,7 +1,7 @@
 import os
 import shutil
 import sys
-from typing import Any
+from typing import Any, cast
 
 
 def is_page_blocked(page: Any) -> bool:
@@ -24,8 +24,11 @@ def is_page_blocked(page: Any) -> bool:
 
 def count_video_links(page: Any) -> int:
     try:
-        return page.evaluate(
-            "() => document.querySelectorAll('a[href*=\"/video/\"]').length"
+        return cast(
+            int,
+            page.evaluate(
+                "() => document.querySelectorAll('a[href*=\"/video/\"]').length"
+            ),
         )
     except Exception:
         return 0
@@ -33,8 +36,10 @@ def count_video_links(page: Any) -> int:
 
 def collect_video_links(page: Any) -> list[dict[str, str]]:
     try:
-        return page.evaluate(
-            """() => {
+        return cast(
+            list[dict[str, str]],
+            page.evaluate(
+                """() => {
                 const seen = new Set();
                 const out = [];
                 document.querySelectorAll('a[href*="/video/"]')
@@ -51,6 +56,7 @@ def collect_video_links(page: Any) -> list[dict[str, str]]:
                     });
                 return out;
             }"""
+            ),
         )
     except Exception:
         return []

@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 from playwright.sync_api import BrowserContext, sync_playwright
 
@@ -152,7 +152,7 @@ class TikTokDownloader:
             delete window.ontouchstart;
             """
             page.add_init_script(js_bypass)
-            return context
+            return cast(BrowserContext, context)
 
         self.reporter.info(
             "BROWSER_INIT browser=%s session=%s",
@@ -183,7 +183,7 @@ class TikTokDownloader:
         context.add_init_script(
             "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         )
-        return context
+        return cast(BrowserContext, context)
 
     def _build_post_url(
         self,
@@ -225,7 +225,13 @@ class TikTokDownloader:
 
         return videos
 
-    def _process_single_video(self, video, do_photo, scraper, dl):
+    def _process_single_video(
+        self,
+        video: PostItem,
+        do_photo: bool,
+        scraper: MusicalDownScraper,
+        dl: MediaDownloader,
+    ) -> tuple[int, int, int, list[PostItem]]:
         try:
             dl_url = scraper.fetch_musicaldown_link(video.url)
             if dl_url == "__IMAGE_POST__":
@@ -251,7 +257,12 @@ class TikTokDownloader:
             self.reporter.error("FAIL %s %s", video.video_id, msg)
             return 0, 0, 0, [video]
 
-    def _process_single_photo_post(self, photo_post, scraper, dl):
+    def _process_single_photo_post(
+        self,
+        photo_post: PostItem,
+        scraper: MusicalDownScraper,
+        dl: MediaDownloader,
+    ) -> tuple[int, int, list[PostItem]]:
         try:
             photos = scraper.fetch_musicaldown_photos(
                 photo_post.url,
@@ -275,11 +286,17 @@ class TikTokDownloader:
             self.reporter.error("FAIL %s %s", photo_post.video_id, msg)
             return 0, 0, [photo_post]
 
-    def _run_pass(self, items, do_video, scraper, dl):
+    def _run_pass(
+        self,
+        items: list[PostItem],
+        do_video: bool,
+        scraper: MusicalDownScraper,
+        dl: MediaDownloader,
+    ) -> tuple[int, int, int, list[PostItem]]:
         videos_done = 0
         photos_done = 0
         skipped = 0
-        failed_items = []
+        failed_items: list[PostItem] = []
 
         total = len(items)
         for idx, item in enumerate(items, 1):
@@ -298,10 +315,10 @@ class TikTokDownloader:
                 skipped += sd
                 failed_items.extend(fl)
             else:
-                pd, sd, fl = self._process_single_photo_post(item, scraper, dl)
+                pd, sd, fl_p = self._process_single_photo_post(item, scraper, dl)
                 photos_done += pd
                 skipped += sd
-                failed_items.extend(fl)
+                failed_items.extend(fl_p)
         return videos_done, photos_done, skipped, failed_items
 
     def _run(

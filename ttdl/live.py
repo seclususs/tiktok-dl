@@ -2,7 +2,7 @@ import os
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yt_dlp
 
@@ -30,7 +30,7 @@ class LiveDownloader:
             with self.reporter:
                 tracker.start()
                 with yt_dlp.YoutubeDL(cfg) as ydl:
-                    code = ydl.download([url])
+                    code = cast(int, ydl.download([url]))
 
                 if not yt_log.offline:
                     self.reporter.info("stream end")
