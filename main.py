@@ -6,16 +6,12 @@ from pathlib import Path
 
 if "com.termux" in os.environ.get("PREFIX", ""):
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    from ttdl.termux import setup_termux
-
-    setup_termux()
 
 try:
     from ttdl.config import AppConfig
     from ttdl.direct import DirectDownloader
     from ttdl.live import LiveDownloader
     from ttdl.logger import setup_logging
-    from ttdl.mass import TikTokDownloader
     from ttdl.models import DateFilter
     from ttdl.reporter import CliReporter
     from ttdl.utils import parse_url_input
@@ -112,6 +108,21 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+
+    needs_browser = not (args.direct_link or args.target_live or args.usejson)
+    if needs_browser:
+        if "com.termux" in os.environ.get("PREFIX", ""):
+            from ttdl.termux import setup_termux
+
+            setup_termux()
+
+        try:
+            from ttdl.mass import TikTokDownloader
+        except ImportError as e:
+            print(f"\nMissing dependency '{e.name}'.")
+            print("Please install requirements first by running:")
+            print("pip install -r requirements.txt\n")
+            sys.exit(1)
 
     try:
         if args.direct_link:

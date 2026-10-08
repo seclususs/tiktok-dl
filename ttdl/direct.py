@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import time
 from typing import Any
 
 import requests
@@ -30,8 +31,22 @@ class UrlResolver:
         )
 
     def resolve(self) -> dict[str, Any]:
-        resp = self.session.get(self.url, allow_redirects=True, timeout=15)
-        resp.raise_for_status()
+        resp = None
+        last_err = None
+        for attempt in range(1, 4):
+            try:
+                resp = self.session.get(self.url, allow_redirects=True, timeout=30)
+                resp.raise_for_status()
+                break
+            except Exception as e:
+                last_err = e
+                log.warning("UrlResolver attempt %d failed: %s", attempt, e)
+                if attempt < 3:
+                    time.sleep(2)
+
+        if not resp:
+            raise ValueError(f"Failed to resolve URL after 3 attempts: {last_err}")
+
         final_url = resp.url
         html = resp.text
 
