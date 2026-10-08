@@ -75,70 +75,79 @@ class UrlResolver:
 
 
 class DirectDownloader:
-    def __init__(self, config: AppConfig, reporter: Reporter, url: str) -> None:
+    def __init__(self, config: AppConfig, reporter: Reporter, urls: list[str]) -> None:
         self.config = config
         self.reporter = reporter
-        self.url = url
+        self.urls = urls
 
     def execute(self) -> int:
-        self.reporter.info("DIRECT Resolving URL %s", self.url)
-        try:
-            resolver = UrlResolver(self.url)
-            data = resolver.resolve()
-        except Exception as e:
-            self.reporter.error("RESOLVE_FAIL %s", str(e))
-            return 1
+        overall_failed = False
 
-        video_id = data["video_id"]
-        username = data["username"]
-        create_time = data["createTime"]
-        post_type = data["post_type"]
-        final_url = data["final_url"]
+        for url in self.urls:
+            self.reporter.info("DIRECT Resolving URL %s", url)
+            try:
+                resolver = UrlResolver(url)
+                data = resolver.resolve()
+            except Exception as e:
+                self.reporter.error("RESOLVE_FAIL %s", str(e))
+                overall_failed = True
+                continue
 
-        self.reporter.info(
-            "RESOLVED user=%s id=%s type=%s", username, video_id, post_type
-        )
-        output_dir = self.config.downloads_dir / username
-        output_dir.mkdir(parents=True, exist_ok=True)
+            video_id = data["video_id"]
+            username = data["username"]
+            create_time = data["createTime"]
+            post_type = data["post_type"]
+            final_url = data["final_url"]
 
-        dl = MediaDownloader(self.config, self.reporter)
-        scraper = MusicalDownScraper(self.config, output_dir, self.reporter)
+            self.reporter.info(
+                "RESOLVED user=%s id=%s type=%s", username, video_id, post_type
+            )
+            output_dir = self.config.downloads_dir / username
+            output_dir.mkdir(parents=True, exist_ok=True)
 
-        failed = True
-        while failed:
-            failed = False
-            with self.reporter:
-                try:
-                    if post_type == "video":
-                        pi = PostItem.create(
-                            video_id, username, create_time, output_dir, is_photo=False
-                        )
-                        if not pi.output_path.exists():
-                            dl_url = scraper.fetch_musicaldown_link(final_url)
-                            if dl_url == "__IMAGE_POST__":
-                                post_type = "photo"
+            dl = MediaDownloader(self.config, self.reporter)
+            scraper = MusicalDownScraper(self.config, output_dir, self.reporter)
+
+            failed = True
+            while failed:
+                failed = False
+                with self.reporter:
+                    try:
+                        if post_type == "video":
+                            pi = PostItem.create(
+                                video_id,
+                                username,
+                                create_time,
+                                output_dir,
+                                is_photo=False,
+                            )
+                            if not pi.output_path.exists():
+                                dl_url = scraper.fetch_musicaldown_link(final_url)
+                                if dl_url == "__IMAGE_POST__":
+                                    post_type = "photo"
+                                else:
+                                    dl.download_and_process_video(pi, dl_url)
                             else:
-                                dl.download_and_process_video(pi, dl_url)
-                        else:
-                            self.reporter.info("SKIP %s already exists", video_id)
+                                self.reporter.info("SKIP %s already exists", video_id)
 
-                    if post_type == "photo":
-                        photos = scraper.fetch_musicaldown_photos(
-                            final_url, video_id, create_time
-                        )
-                        if not photos:
-                            failed = True
-                            continue
-                        for ph in photos:
-                            dl.download_photo(ph)
-                except Exception as e:
-                    self.reporter.error("FAIL %s", str(e))
-                    failed = True
+                        if post_type == "photo":
+                            photos = scraper.fetch_musicaldown_photos(
+                                final_url, video_id, create_time
+                            )
+                            if not photos:
+                                failed = True
+                                continue
+                            for ph in photos:
+                                dl.download_photo(ph)
+                    except Exception as e:
+                        self.reporter.error("FAIL %s", str(e))
+                        failed = True
 
-            if failed and not self.reporter.ask_retry():
-                break
+                if failed and not self.reporter.ask_retry():
+                    overall_failed = True
+                    break
 
-        if failed:
+        if overall_failed:
             return 1
 
         self.reporter.info("EXEC_DONE Direct download complete")

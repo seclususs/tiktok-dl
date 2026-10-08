@@ -105,8 +105,8 @@ class CliReporter(Reporter):
         self.progress.update(self.live_task, size=size, speed=speed)
 
     def ask_retry(self) -> bool:
-        return Confirm.ask(
-            "Do you want to retry failed downloads?", console=self.console
+        return bool(
+            Confirm.ask("Do you want to retry failed downloads?", console=self.console)
         )
 
     def __enter__(self) -> Self:

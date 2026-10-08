@@ -18,6 +18,7 @@ try:
     from ttdl.mass import TikTokDownloader
     from ttdl.models import DateFilter
     from ttdl.reporter import CliReporter
+    from ttdl.utils import parse_url_input
 except ImportError as e:
     print(f"\nMissing dependency '{e.name}'.")
     print("Please install requirements first by running:")
@@ -44,7 +45,7 @@ def main() -> None:
         "--direct-link",
         type=str,
         metavar="URL",
-        help="Download directly from a TikTok URL. \nExample: -dl https://vt.tiktok.com/",
+        help="Download directly from URL or txt file.\nExample: -dl https://vt.tiktok.com/ or -dl urls.txt",
     )
     group.add_argument(
         "-tm",
@@ -116,7 +117,9 @@ def main() -> None:
         if args.direct_link:
             if args.date:
                 reporter.warning("--date argument is ignored for direct link downloads")
-            sys.exit(DirectDownloader(config, reporter, args.direct_link).execute())
+
+            urls = parse_url_input(args.direct_link)
+            sys.exit(DirectDownloader(config, reporter, urls).execute())
         elif args.target_live:
             if args.date:
                 reporter.warning("--date argument is ignored for live downloads")

@@ -11,6 +11,7 @@ def setup_logging(logs_dir: Path) -> None:
         level=logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="[%X]",
+        force=True,
         handlers=[
             RotatingFileHandler(
                 log_file, maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8"

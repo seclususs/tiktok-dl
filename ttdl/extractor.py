@@ -214,7 +214,7 @@ class ProfileExtractor:
         if not videos_dict:
             self.reporter.info("FALLBACK static HTML parse")
             for a_tag in soup.find_all("a", href=True):
-                match = re.search(r"/@([^/]+)/video/(\d+)", a_tag["href"])
+                match = re.search(r"/@([^/]+)/video/(\d+)", str(a_tag["href"] or ""))
                 if match:
                     vid_id = match.group(2)
                     if vid_id not in videos_dict:

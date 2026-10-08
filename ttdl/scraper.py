@@ -71,13 +71,13 @@ class MusicalDownScraper:
 
                 data = {}
                 for inp in form.find_all("input"):
-                    name = inp.get("name")
+                    name = str(inp.get("name") or "")
                     if not name:
                         continue
-                    if inp.get("type") in ["text", "url"]:
+                    if str(inp.get("type") or "") in ["text", "url"]:
                         data[name] = post_url
                     else:
-                        data[name] = inp.get("value", "")
+                        data[name] = str(inp.get("value") or "")
 
                 self.reporter.info("MUSICALDOWN_SUBMIT")
                 session.headers.update({"Referer": "https://musicaldown.com/en"})
@@ -94,7 +94,7 @@ class MusicalDownScraper:
 
                 self._last_url = post_url
                 self._last_html = html_content
-                return html_content
+                return str(html_content)
             except Exception as e:
                 msg = str(e).split("\n")[0][:120]
                 self.reporter.warning(
@@ -162,7 +162,7 @@ class MusicalDownScraper:
         soup = BeautifulSoup(html_content, "html.parser")
         photo_links: list[str] = []
         for link in soup.find_all("a", href=True):
-            href = link.get("href", "")
+            href = str(link.get("href") or "")
             text = link.get_text(strip=True).upper()
             if text == "DOWNLOAD" and href and "musicaldown" not in href.lower():
                 photo_links.append(href)
@@ -170,7 +170,7 @@ class MusicalDownScraper:
                 photo_links.append(urljoin("https://musicaldown.com", href))
         if not photo_links:
             for img in soup.find_all("img"):
-                src = img.get("src", "")
+                src = str(img.get("src") or "")
                 if src and ("tiktokcdn" in src or "p16" in src):
                     photo_links.append(src)
         if not photo_links:
