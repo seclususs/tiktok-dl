@@ -27,35 +27,53 @@ def count_video_links(page: Any) -> int:
         return cast(
             int,
             page.evaluate(
-                "() => document.querySelectorAll('a[href*=\"/video/\"]').length"
+                """() => {
+                const userPage = document.querySelector('[data-e2e="user-page"]') ||
+                                 document.querySelector('[data-e2e="user-post-item-list"]') ||
+                                 document;
+                return userPage.querySelectorAll('a[href*="/video/"], a[href*="/photo/"], a[href*="/story/"]').length;
+            }"""
             ),
         )
     except Exception:
         return 0
 
 
-def collect_video_links(page: Any) -> list[dict[str, str]]:
+def collect_video_links(
+    page: Any, target_username: str | None = None
+) -> list[dict[str, str]]:
     try:
+        target_clean = target_username.lstrip("@").lower() if target_username else ""
         return cast(
             list[dict[str, str]],
             page.evaluate(
-                """() => {
+                """(target) => {
                 const seen = new Set();
                 const out = [];
-                document.querySelectorAll('a[href*="/video/"]')
+                const userPage = document.querySelector('[data-e2e="user-page"]') ||
+                                 document.querySelector('[data-e2e="user-post-item-list"]') ||
+                                 document;
+                const selector = 'a[href*="/video/"], a[href*="/photo/"], a[href*="/story/"]';
+
+                userPage.querySelectorAll(selector)
                     .forEach(a => {
                         const m = (a.getAttribute('href') || '')
-                            .match(/@([^/]+)\\/video\\/(\\d+)/);
+                            .match(/@([^/]+)\\/(?:video|photo|story)\\/(\\d+)/);
                         if (m && !seen.has(m[2])) {
+                            const author = m[1];
+                            if (target && author.toLowerCase() !== target) {
+                                return;
+                            }
                             seen.add(m[2]);
                             out.push({
-                                author: m[1],
+                                author: author,
                                 videoId: m[2],
                             });
                         }
                     });
                 return out;
-            }"""
+            }""",
+                target_clean,
             ),
         )
     except Exception:

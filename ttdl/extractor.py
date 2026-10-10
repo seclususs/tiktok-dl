@@ -25,7 +25,7 @@ class ProfileExtractor:
         force: bool = False,
     ):
         self.reporter = reporter
-        self.target_username = target_username
+        self.target_username = target_username.lstrip("@")
         self.config = config
         self.workspace_dir = config.workspace_dir
         self.logs_dir = config.logs_dir
@@ -35,6 +35,11 @@ class ProfileExtractor:
         self.json_dir.mkdir(parents=True, exist_ok=True)
         self.json_path = self.json_dir / f"{self.target_username}.json"
 
+    def _is_target_author(self, author_name: str | None) -> bool:
+        if not author_name:
+            return True
+        return author_name.lstrip("@").lower() == self.target_username.lower()
+
     def _handle_api_response(
         self,
         response: Any,
@@ -42,10 +47,19 @@ class ProfileExtractor:
     ) -> None:
         try:
             url = response.url
+            if any(
+                ign in url
+                for ign in ["/recommend/", "/related/", "/explore/", "/feed/"]
+            ):
+                return
+
             api_patterns = [
                 "/api/post/item_list",
+                "/api/story/item_list",
                 "/api/creator/item_list",
-                "item_list",
+                "/api/mix/item_list",
+                "/api/playlist/item_list",
+                "/api/user/playlist",
             ]
             if not any(p in url for p in api_patterns):
                 return
@@ -76,8 +90,25 @@ class ProfileExtractor:
                 if not (vid_id.isdigit() and len(vid_id) >= 15):
                     continue
 
-                c_time = item.get("createTime") or item.get("create_time") or 0
                 author = item.get("author")
+                author_name = ""
+                if isinstance(author, dict):
+                    author_name = str(
+                        author.get("uniqueId") or author.get("unique_id") or ""
+                    )
+                elif isinstance(author, str):
+                    author_name = author
+
+                if author_name and not self._is_target_author(author_name):
+                    self.reporter.info(
+                        "AUTHOR_SKIP id=%s author=%s (target=%s)",
+                        vid_id,
+                        author_name,
+                        self.target_username,
+                    )
+                    continue
+
+                c_time = item.get("createTime") or item.get("create_time") or 0
                 post_type = "photo" if "imagePost" in item else "video"
                 duration = 0
                 vid_data = item.get("video")
@@ -155,7 +186,16 @@ class ProfileExtractor:
             consecutive_known = 0
             smart_stop_triggered = False
 
-            for vl in collect_video_links(page):
+            for vl in collect_video_links(page, self.target_username):
+                author = vl.get("author", "")
+                if author and not self._is_target_author(author):
+                    self.reporter.info(
+                        "AUTHOR_SKIP id=%s author=%s (target=%s)",
+                        vl.get("videoId"),
+                        author,
+                        self.target_username,
+                    )
+                    continue
                 vid_id = vl["videoId"]
                 if vid_id not in videos_dict:
                     videos_dict[vid_id] = {
@@ -214,13 +254,19 @@ class ProfileExtractor:
         if not videos_dict:
             self.reporter.info("FALLBACK static HTML parse")
             for a_tag in soup.find_all("a", href=True):
-                match = re.search(r"/@([^/]+)/video/(\d+)", str(a_tag["href"] or ""))
+                match = re.search(
+                    r"/@([^/]+)/(?:video|photo|story)/(\d+)",
+                    str(a_tag["href"] or ""),
+                )
                 if match:
+                    author_match = match.group(1)
+                    if not self._is_target_author(author_match):
+                        continue
                     vid_id = match.group(2)
                     if vid_id not in videos_dict:
                         videos_dict[vid_id] = {
                             "id": vid_id,
-                            "author": match.group(1),
+                            "author": author_match,
                             "createTime": (
                                 int(vid_id) >> 32
                                 if vid_id.isdigit()
@@ -237,9 +283,17 @@ class ProfileExtractor:
             script_text = getattr(script_tag, "string", None)
             if script_text:
                 try:
+                    raw_data = json.loads(script_text.strip())
+                    user_scope = (
+                        raw_data.get("__DEFAULT_SCOPE__", {}).get("webapp.user-detail")
+                        if isinstance(raw_data, dict)
+                        else None
+                    )
+                    data_to_extract = user_scope if user_scope else raw_data
                     extract_video_nodes(
-                        json.loads(script_text.strip()),
+                        data_to_extract,
                         videos_dict,
+                        self.target_username,
                     )
                 except Exception:
                     pass
@@ -330,7 +384,7 @@ class ProfileExtractor:
             if count_video_links(page) == 0:
                 try:
                     page.wait_for_selector(
-                        'a[href*="/video/"]',
+                        'a[href*="/video/"], a[href*="/photo/"], a[href*="/story/"]',
                         state="attached",
                         timeout=30000,
                     )

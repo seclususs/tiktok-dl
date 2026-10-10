@@ -4,6 +4,8 @@ from pathlib import Path
 
 import tomllib
 
+from ttdl.termux import is_termux
+
 
 def _parse_size(size_str: str) -> int:
     size_str = size_str.upper().strip()
@@ -53,7 +55,10 @@ class AppConfig:
     browser_executable: str | None = None
 
     def __post_init__(self) -> None:
-        self.downloads_dir = self.workspace_dir / "downloads"
+        if is_termux():
+            self.downloads_dir = Path("/storage/emulated/0/Download/ttdl")
+        else:
+            self.downloads_dir = self.workspace_dir / "downloads"
         self.tmp_dir = self.workspace_dir / ".tmp"
         self.logs_dir = self.workspace_dir / "logs"
         self.session_dir = self.workspace_dir / ".sessions"
@@ -61,7 +66,10 @@ class AppConfig:
         self._load_toml()
 
     def _ensure_folders(self) -> None:
-        self.downloads_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.downloads_dir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
         self.tmp_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.session_dir.mkdir(parents=True, exist_ok=True)

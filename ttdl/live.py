@@ -20,11 +20,12 @@ class LiveDownloader:
     def execute(self) -> int:
         url = f"https://www.tiktok.com/@{self.target}/live"
         self.reporter.info(f"target {self.target}")
-        self.reporter.info(f"out downloads/live/{self.target}")
+        live_out_dir = self.config.downloads_dir / "live" / self.target
+        self.reporter.info(f"out {live_out_dir}")
 
         yt_log = _YtLog(self.reporter)
         cfg = self._make_cfg(yt_log)
-        tracker = _SizeTracker(self.target, self.workspace_dir, self.reporter)
+        tracker = _SizeTracker(self.target, self.config.downloads_dir, self.reporter)
 
         try:
             with self.reporter:
@@ -44,8 +45,7 @@ class LiveDownloader:
 
     def _make_cfg(self, yt_log: "_YtLog") -> dict[str, Any]:
         outtmpl = str(
-            self.workspace_dir
-            / "downloads"
+            self.config.downloads_dir
             / "live"
             / self.target
             / f"{self.target}_live_%(id)s_%(epoch)s.%(ext)s"
@@ -104,8 +104,8 @@ class _YtLog:
 
 
 class _SizeTracker:
-    def __init__(self, target: str, workspace_dir: Path, reporter: Reporter) -> None:
-        self.out_dir = workspace_dir / "downloads" / "live" / target
+    def __init__(self, target: str, downloads_dir: Path, reporter: Reporter) -> None:
+        self.out_dir = downloads_dir / "live" / target
         self.reporter = reporter
         self.active = False
         self.worker = threading.Thread(target=self._scan, daemon=True)

@@ -14,10 +14,11 @@ def parse_url_input(target: str) -> list[str]:
 def extract_video_nodes(
     node: Any,
     collection: dict[str, dict[str, Any]],
+    target_username: str | None = None,
 ) -> None:
     if isinstance(node, list):
         for item in node:
-            extract_video_nodes(item, collection)
+            extract_video_nodes(item, collection, target_username)
         return
 
     if not isinstance(node, dict):
@@ -25,6 +26,25 @@ def extract_video_nodes(
 
     vid_id = str(node.get("id", node.get("item_id", node.get("video_id", ""))))
     if vid_id.isdigit() and len(vid_id) >= 15:
+        author_val = node.get("author")
+        author_name = ""
+        if isinstance(author_val, dict):
+            author_name = str(
+                author_val.get("uniqueId") or author_val.get("unique_id") or ""
+            )
+        elif isinstance(author_val, str):
+            author_name = author_val
+
+        target_clean = target_username.lstrip("@").lower() if target_username else ""
+        if (
+            target_clean
+            and author_name
+            and author_name.lstrip("@").lower() != target_clean
+        ):
+            for value in node.values():
+                extract_video_nodes(value, collection, target_username)
+            return
+
         c_time = node.get("createTime") or node.get("create_time")
         c_time_int = int(c_time) if c_time else 0
         if not c_time_int and vid_id.isdigit():
@@ -55,4 +75,4 @@ def extract_video_nodes(
             except ValueError:
                 pass
     for value in node.values():
-        extract_video_nodes(value, collection)
+        extract_video_nodes(value, collection, target_username)
