@@ -11,3 +11,6 @@ temp_raw_*.mp4
 temp_proc_*.mp4
 error_dump_*.html
 error_md_*.html
+*.egg-info/
+dist/
+build/

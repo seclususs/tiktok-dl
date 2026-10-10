@@ -32,7 +32,7 @@ jobs:
 
       - name: Static type checking
         run: |
-          mypy ttdl main.py --strict --ignore-missing-imports
+          mypy ttdl --strict --ignore-missing-imports
 
   cli-test:
     name: CLI Test
@@ -52,11 +52,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
 
-      - name: Install dependencies
+      - name: Install dependencies and package
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install .
 
       - name: Test CLI entry point
         run: |
-          python main.py -h
+          ttdl -h
+          python -m ttdl -h

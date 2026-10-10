@@ -1,5 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ttdl"
+version = "1.0.0"
+description = "TikTok Downloader - Videos, Photos, and Live Streams"
+readme = "README.md"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Video",
+]
+dependencies = [
+    "beautifulsoup4>=4.12.0",
+    'playwright>=1.40.0; sys_platform != "linux" or platform_machine == "x86_64"',
+    "requests>=2.31.0",
+    "rich>=13.0.0",
+    "yt-dlp>=2024.1.0",
+    "piexif>=1.1.3",
+]
+
+[project.scripts]
+ttdl = "ttdl.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["ttdl*"]
+
 [tool.ruff]
 line-length = 88
+target-version = "py311"
 
 [tool.ruff.lint]
-ignore = ["BLE001", "S110", "S112"]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501", "BLE001", "S110", "S112"]

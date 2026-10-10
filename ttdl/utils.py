@@ -4,7 +4,7 @@ from typing import Any
 
 def parse_url_input(target: str) -> list[str]:
     if os.path.isfile(target):
-        with open(target, "r", encoding="utf-8") as f:
+        with open(target, encoding="utf-8") as f:
             return [
                 line.strip() for line in f if line.strip() and not line.startswith("#")
             ]

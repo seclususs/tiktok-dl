@@ -1,6 +1,6 @@
 import calendar
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional
 
@@ -31,8 +31,8 @@ class DateFilter:
             day = calendar.monthrange(year, month)[1] if is_end else 1
 
         if is_end:
-            return datetime(year, month, day, 23, 59, 59, tzinfo=timezone.utc)
-        return datetime(year, month, day, 0, 0, 0, tzinfo=timezone.utc)
+            return datetime(year, month, day, 23, 59, 59, tzinfo=UTC)
+        return datetime(year, month, day, 0, 0, 0, tzinfo=UTC)
 
     @classmethod
     def build(cls, date_input: str | None) -> Optional["DateFilter"]:
@@ -73,9 +73,9 @@ class PostItem:
         is_photo: bool = False,
     ) -> "PostItem":
         dt_obj = (
-            datetime.fromtimestamp(create_time, tz=timezone.utc)
+            datetime.fromtimestamp(create_time, tz=UTC)
             if create_time > 0
-            else datetime.now(timezone.utc)
+            else datetime.now(UTC)
         )
         ts_str = dt_obj.strftime("%Y%m%d_%H%M%S")
         url = f"https://www.tiktok.com/@{username}/video/{video_id}"
@@ -118,9 +118,9 @@ class PhotoMetadata:
         output_dir: Path,
     ) -> "PhotoMetadata":
         dt_obj = (
-            datetime.fromtimestamp(create_time, tz=timezone.utc)
+            datetime.fromtimestamp(create_time, tz=UTC)
             if create_time > 0
-            else datetime.now(timezone.utc)
+            else datetime.now(UTC)
         )
         ts_str = dt_obj.strftime("%Y%m%d_%H%M%S")
         filename = f"IMG_{ts_str}_{post_id}_s{slide_index}.jpg"

@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from bs4 import BeautifulSoup
@@ -204,7 +204,7 @@ class ProfileExtractor:
                         "createTime": (
                             int(vid_id) >> 32
                             if vid_id.isdigit()
-                            else int(datetime.now(timezone.utc).timestamp())
+                            else int(datetime.now(UTC).timestamp())
                         ),
                         "post_type": None,
                         "duration": 0,
@@ -270,7 +270,7 @@ class ProfileExtractor:
                             "createTime": (
                                 int(vid_id) >> 32
                                 if vid_id.isdigit()
-                                else int(datetime.now(timezone.utc).timestamp())
+                                else int(datetime.now(UTC).timestamp())
                             ),
                             "post_type": None,
                             "duration": 0,
@@ -308,7 +308,7 @@ class ProfileExtractor:
 
         if self.json_path.exists():
             try:
-                with open(self.json_path, "r", encoding="utf-8") as f:
+                with open(self.json_path, encoding="utf-8") as f:
                     videos_dict = json.load(f)
                 cached_ids = set(videos_dict.keys())
                 self.reporter.info("CACHE_LOAD found %d posts", len(videos_dict))

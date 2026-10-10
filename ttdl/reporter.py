@@ -1,7 +1,7 @@
 import logging
 import re
 import types
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Self
 
 from rich.console import Console
@@ -62,7 +62,7 @@ class CliReporter(Reporter):
         self.progress.remove_task(task_id)
 
     def _print(self, level: str, msg: str, level_color: str) -> None:
-        time_str = datetime.now(timezone.utc).astimezone().strftime("%X")
+        time_str = datetime.now(UTC).astimezone().strftime("%X")
 
         match = re.match(r"^([A-Z_]+)(.*)", msg)
         if match:

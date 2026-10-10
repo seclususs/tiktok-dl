@@ -15,60 +15,85 @@ A utility to download TikTok videos, photos, and live streams.
 - FFmpeg and FFprobe available on `PATH`
 - Microsoft Edge or Google Chrome
 
-## Usage
+## Installation
 
-Install dependencies:
+Install via pip:
 
 ```bash
-pip install -r requirements.txt
+pip install .
 ```
+
+Or for development (editable mode):
+
+```bash
+pip install -e .
+```
+
+## Usage
 
 Download everything from a profile:
 
 ```bash
-python main.py -tm username
+ttdl batch username
 ```
 
 Videos only:
 
 ```bash
-python main.py -tv username
+ttdl video username
 ```
 
 Photos only:
 
 ```bash
-python main.py -tp username
+ttdl photo username
 ```
 
 Filter by date:
 
 ```bash
-python main.py -tm username --date 2023
-python main.py -tm username --date 2023-10
-python main.py -tm username --date 2023-12-25
-python main.py -tm username --date 2021:2023
-python main.py -tm username --date 2023-01:2023-06
-python main.py -tm username --date 2024-12-22:2025-01-01
-python main.py -tm username --date 2023-03-15:2024
+ttdl batch username --date 2023
+ttdl batch username --date 2023-10
+ttdl batch username --date 2023-12-25
+ttdl batch username --date 2021:2023
+ttdl batch username --date 2023-01:2023-06
+ttdl batch username --date 2024-12-22:2025-01-01
+ttdl batch username --date 2023-03-15:2024
 ```
 
-The `--date` filter can be combined with any mass download argument.
-You can use it with `-tv` to download only videos or `-tp` for
-only photos within a specific date or range.
+The `--date` filter can be combined with `batch`, `video`, or `photo`.
 
-Output lands in `downloads/<username>/`.
-
-Download a single direct link:
+Scrape and save JSON cache only (no media download):
 
 ```bash
-python main.py -dl "https://www.tiktok.com/@username/video/123456789"
+ttdl batch username --scrape
 ```
+
+Download directly from existing JSON cache (skip browser scraping):
+
+```bash
+ttdl batch username --cached
+```
+
+Force full profile scrape:
+
+```bash
+ttdl batch username --force
+```
+
+Download a single direct link or a text file of URLs:
+
+```bash
+ttdl url "https://www.tiktok.com/@username/video/123456789"
+ttdl url urls.txt
+```
+
+Output lands in `downloads/<username>/`.
 
 Download Live Stream:
 
 ```bash
-python main.py -tl username
+ttdl live username
 ```
 
 Output lands in `downloads/live/<username>/`.

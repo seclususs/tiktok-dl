@@ -44,7 +44,7 @@ def setup_termux() -> None:
         )
         target_version = None
         if os.path.exists(req_path):
-            with open(req_path, "r", encoding="utf-8") as f:
+            with open(req_path, encoding="utf-8") as f:
                 for line in f:
                     if line.startswith("playwright=="):
                         target_version = line.split("==")[1].split(";")[0].strip()

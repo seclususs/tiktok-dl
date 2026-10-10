@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from playwright.sync_api import BrowserContext, sync_playwright
@@ -62,7 +62,7 @@ class TikTokDownloader:
             if ct == 0:
                 filtered[k] = v
                 continue
-            dt = datetime.fromtimestamp(ct, tz=timezone.utc)
+            dt = datetime.fromtimestamp(ct, tz=UTC)
             if self.date_filter.matches(dt):
                 filtered[k] = v
 

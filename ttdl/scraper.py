@@ -1,7 +1,7 @@
 import logging
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -182,7 +182,7 @@ class MusicalDownScraper:
 
         self.reporter.info("PHOTO_FOUND %s slides=%d", post_id, len(photo_links))
 
-        base_dt = datetime.fromtimestamp(create_time, tz=timezone.utc)
+        base_dt = datetime.fromtimestamp(create_time, tz=UTC)
         photos: list[PhotoMetadata] = []
         for idx, dl_url in enumerate(photo_links):
             slide_dt = base_dt + timedelta(seconds=idx)
