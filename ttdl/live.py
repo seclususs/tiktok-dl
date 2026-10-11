@@ -267,9 +267,18 @@ class LiveDownloader:
                     cmd,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
                 )
                 proc.wait()
+
+            if proc.returncode != 0 and (
+                not out_file.exists() or out_file.stat().st_size == 0
+            ):
+                if out_file.exists():
+                    out_file.unlink(missing_ok=True)
+                self.reporter.error("REC_FAIL FFmpeg recording failed")
+                return 1
+
             self.reporter.info("STREAM_END file=%s", out_file.name)
             self.reporter.info("EXEC_DONE Live stream recording complete")
             self.reporter.print_summary(

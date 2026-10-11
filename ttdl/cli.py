@@ -300,6 +300,7 @@ def main() -> None:
             sys.exit(0)
 
         if cmd == "clean":
+            logging.shutdown()
             files_removed, bytes_freed = clean_cache(
                 config, clean_all=args.all, clean_json=args.json
             )

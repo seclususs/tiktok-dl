@@ -185,20 +185,6 @@ class TikTokDownloader:
         )
         return cast(BrowserContext, context)
 
-    def _build_post_url(
-        self,
-        post_id: str,
-        data: dict[str, Any],
-    ) -> str:
-        author = data.get("author")
-        author_str = self.target_username
-        if isinstance(author, dict) and "uniqueId" in author:
-            author_str = author["uniqueId"]
-        elif isinstance(author, str) and author.strip():
-            author_str = author
-
-        return f"https://www.tiktok.com/@{author_str}/video/{post_id}"
-
     def _build_video_list(
         self,
         posts: dict[str, dict[str, Any]],

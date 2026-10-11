@@ -356,8 +356,9 @@ def clean_cache(
         nonlocal files_removed, bytes_freed
         try:
             if p.is_file():
-                bytes_freed += p.stat().st_size
+                size = p.stat().st_size
                 p.unlink(missing_ok=True)
+                bytes_freed += size
                 files_removed += 1
         except OSError:
             pass
