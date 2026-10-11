@@ -428,7 +428,7 @@ class MediaDownloader:
             "PURGE_SCAN checking existing files for sub-%dp",
             self.config.min_video_height,
         )
-        removed = 0
+        candidates: list[tuple[Path, int, int]] = []
 
         for mp4 in output_dir.glob("*.mp4"):
             try:
@@ -456,15 +456,28 @@ class MediaDownloader:
                         except ValueError:
                             continue
                         if min(width, height) < self.config.min_video_height:
-                            self.reporter.info(
-                                "PURGE %s res=%dx%d",
-                                mp4.name,
-                                width,
-                                height,
-                            )
-                            mp4.unlink()
-                            removed += 1
+                            candidates.append((mp4, width, height))
             except Exception:
                 pass
+
+        if not candidates:
+            return
+
+        prompt = (
+            f"Found {len(candidates)} sub-{self.config.min_video_height}p "
+            "video(s) in output directory. Purge them?"
+        )
+        if not self.reporter.ask_confirm(prompt, default=False):
+            self.reporter.info("PURGE_SKIPPED Sub-res files retained")
+            return
+
+        removed = 0
+        for mp4, width, height in candidates:
+            try:
+                self.reporter.info("PURGE %s res=%dx%d", mp4.name, width, height)
+                mp4.unlink()
+                removed += 1
+            except Exception as e:
+                self.reporter.error("PURGE_FAIL %s: %s", mp4.name, e)
 
         self.reporter.info("PURGE_DONE removed=%d", removed)

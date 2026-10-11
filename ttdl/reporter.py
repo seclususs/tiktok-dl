@@ -187,8 +187,6 @@ class CliReporter(Reporter):
         self.progress.remove_task(task_id)
 
     def _print(self, level: str, msg: str, level_color: str) -> None:
-        time_str = datetime.now(UTC).astimezone().strftime("%X")
-
         if self.is_narrow and "/data/data/com.termux/files/home" in msg:
             msg = msg.replace("/data/data/com.termux/files/home", "~")
 
@@ -197,9 +195,12 @@ class CliReporter(Reporter):
             tag, rest = match.groups()
             msg = f"[bold {level_color}]{tag}[/bold {level_color}]{rest}"
 
-        formatted = (
-            f"[dim]{time_str}[/dim] [{level_color}]{level:<7}[/{level_color}] {msg}"
-        )
+        prefix = ""
+        if self.verbose:
+            time_str = datetime.now(UTC).astimezone().strftime("%X")
+            prefix = f"[dim]{time_str}[/dim] "
+
+        formatted = f"{prefix}[{level_color}]{level:<7}[/{level_color}] {msg}"
         if self._is_active:
             self.progress.console.print(formatted)
         else:
@@ -269,7 +270,7 @@ class CliReporter(Reporter):
             except Exception:
                 pass
 
-        max_len = max(20, self.console.width - 24)
+        max_len = max(20, self.console.width - 20)
         if len(val) > max_len:
             half = (max_len - 3) // 2
             val = f"{val[:half]}...{val[-half:]}"
@@ -279,16 +280,16 @@ class CliReporter(Reporter):
         self, title: str, stats: list[tuple[str, str]], style: str = "cyan"
     ) -> None:
         self.clear_status()
-        table = Table.grid(padding=(0, 2))
+        table = Table.grid(padding=(0, 2), expand=True)
         table.add_column(style="bold white", justify="right")
-        table.add_column(style="cyan")
+        table.add_column(style="cyan", overflow="fold")
         for k, v in stats:
             table.add_row(f"{k}:", self._format_stat_val(v))
         panel = Panel(
             table,
             title=f"[bold {style}]{title}[/bold {style}]",
             border_style=style,
-            expand=False,
+            expand=True,
         )
         if self._is_active:
             self.progress.console.print(panel)
@@ -306,6 +307,10 @@ class CliReporter(Reporter):
         return bool(
             Confirm.ask("Do you want to retry failed downloads?", console=self.console)
         )
+
+    def ask_confirm(self, prompt: str, default: bool = False) -> bool:
+        target_console = self.progress.console if self._is_active else self.console
+        return bool(Confirm.ask(prompt, console=target_console, default=default))
 
     def __enter__(self) -> Self:
         self.progress.start()

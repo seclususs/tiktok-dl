@@ -1,6 +1,7 @@
 import argparse
 import logging
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -28,31 +29,32 @@ def _add_profile_options(p: argparse.ArgumentParser) -> None:
         "--date",
         type=str,
         help=(
-            "Date filter (YYYY, YYYY-MM, YYYY-MM-DD) or range (start:end).\n"
+            "Date filter (YYYY, YYYY-MM, YYYY-MM-DD)\n"
+            "or range (start:end).\n"
             "Examples:\n"
-            "  --date 2023                   (Whole year 2023)\n"
-            "  --date 2023-10                (Whole month of Oct 2023)\n"
-            "  --date 2023-12-25             (Specific single day)\n"
-            "  --date 2021:2023              (Range: Jan 1, 2021 to Dec 31, 2023)\n"
-            "  --date 2023-01:2023-06        (Range: Jan 1, 2023 to Jun 30, 2023)\n"
-            "  --date 2024-12-22:2025-01-01  (Range: Dec 22, 2024 to Jan 1, 2025)\n"
-            "  --date 2023-03-15:2024        (Mixed range: Mar 15, 2023 to Dec 31, 2024)"
+            "  2023                   (Whole year 2023)\n"
+            "  2023-10        (Whole month of Oct 2023)\n"
+            "  2023-12-25         (Specific single day)\n"
+            "  2021:2023   (Jan 1, 2021 - Dec 31, 2023)\n"
+            "  2023-01:2023-06   (Jan 1 - Jun 30, 2023)\n"
+            "  2024-12-22:2025-01-01        (Day range)\n"
+            "  2023-03-15:2024            (Mixed range)"
         ),
     )
     p.add_argument(
         "--scrape",
         action="store_true",
-        help="Scrape and update JSON cache only, do not download media",
+        help="Scrape & cache metadata only,\ndo not download media",
     )
     p.add_argument(
         "--cached",
         action="store_true",
-        help="Skip browser scraping, load from JSON cache and download directly",
+        help="Skip browser scraping, load from\nJSON cache and download directly",
     )
     p.add_argument(
         "--force",
         action="store_true",
-        help="Force full profile scrape, ignoring smart stop",
+        help="Force full profile scrape, ignoring\nconsecutive duplicate stop",
     )
 
 
@@ -66,13 +68,31 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Enable detailed debug logging",
     )
 
+    def raw_formatter(prog: str) -> argparse.HelpFormatter:
+        term_width = max(24, min(shutil.get_terminal_size((62, 20)).columns, 80))
+        return argparse.RawTextHelpFormatter(
+            prog,
+            max_help_position=18,
+            width=term_width,
+        )
+
+    epilog = (
+        "profile options (for batch, video, photo):\n"
+        "  --date DATE     Filter posts by date or range\n"
+        "                  (e.g. 2023, 2023-10, 2022:2023)\n"
+        "  --scrape        Scrape & cache only, no media\n"
+        "  --cached        Download from JSON cache directly\n"
+        "  --force         Force full profile scrape\n"
+        "\n"
+        "Run 'ttdl <command> --help' for command details."
+    )
+
     parser = argparse.ArgumentParser(
         prog="ttdl",
         description="TikTok Downloader - Videos, Photos, and Live Streams",
+        epilog=epilog,
         parents=[base_parser],
-        formatter_class=lambda prog: argparse.RawTextHelpFormatter(
-            prog, max_help_position=32
-        ),
+        formatter_class=raw_formatter,
     )
     parser.add_argument(
         "-V",
@@ -84,7 +104,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(
         dest="command",
         title="commands",
-        metavar="{batch,video,photo,live,url,config,clean,login}",
+        metavar="<command>",
         required=True,
     )
 
@@ -92,8 +112,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_batch = subparsers.add_parser(
         "batch",
         parents=[base_parser],
-        help="Download everything (videos and photos) from target profile",
-        description="Download all posts (videos, photos, stories) from target username.",
+        help="Download all media from target profile",
+        description="Download all posts (videos, photos, stories)\nfrom target username.",
+        formatter_class=raw_formatter,
     )
     p_batch.add_argument("user", type=str, help="Target TikTok username")
     _add_profile_options(p_batch)
@@ -102,8 +123,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_video = subparsers.add_parser(
         "video",
         parents=[base_parser],
-        help="Download videos only from target profile",
+        help="Download videos only from profile",
         description="Download videos only from target username.",
+        formatter_class=raw_formatter,
     )
     p_video.add_argument("user", type=str, help="Target TikTok username")
     _add_profile_options(p_video)
@@ -112,8 +134,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_photo = subparsers.add_parser(
         "photo",
         parents=[base_parser],
-        help="Download photos only from target profile",
+        help="Download photos only from profile",
         description="Download photos only from target username.",
+        formatter_class=raw_formatter,
     )
     p_photo.add_argument("user", type=str, help="Target TikTok username")
     _add_profile_options(p_photo)
@@ -122,29 +145,31 @@ def _build_parser() -> argparse.ArgumentParser:
     p_live = subparsers.add_parser(
         "live",
         parents=[base_parser],
-        help="Record live stream from target profile",
+        help="Record live stream from profile",
         description="Capture ongoing live stream from target username.",
+        formatter_class=raw_formatter,
     )
     p_live.add_argument("user", type=str, help="Target TikTok username")
     p_live.add_argument(
         "--cookies",
         type=str,
         default=None,
-        help="Path to cookies file (Netscape format / cookies.txt)",
+        help="Path to cookies file\n(Netscape format / cookies.txt)",
     )
 
     # Subcommand: url
     p_url = subparsers.add_parser(
         "url",
         parents=[base_parser],
-        help="Download directly from video/photo URL or txt file",
-        description="Download directly from a single URL or a file containing URLs.",
+        help="Download from single URL or list file",
+        description="Download directly from a single URL or\na file containing URLs.",
+        formatter_class=raw_formatter,
     )
     p_url.add_argument(
         "target",
         type=str,
         metavar="URL_OR_FILE",
-        help="TikTok video/photo URL or path to text file listing URLs",
+        help="TikTok video/photo URL or path to\ntext file listing URLs",
     )
 
     # Subcommand: config
@@ -152,14 +177,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "config",
         parents=[base_parser],
         help="View, edit, or set configuration values",
-        description="Manage ttdl settings in config",
+        description="Manage ttdl settings in config file.",
+        formatter_class=raw_formatter,
     )
     p_config.add_argument(
         "action",
         nargs="?",
         choices=["show", "path", "edit", "set", "get", "reset"],
+        metavar="ACTION",
         default="show",
-        help="Config action to perform (default: show)",
+        help="Action: show, path, edit, set, get, reset\n(default: show)",
     )
     p_config.add_argument("key", nargs="?", help="Configuration key (for set/get)")
     p_config.add_argument("value", nargs="?", help="Value to set (for set)")
@@ -188,26 +215,34 @@ def _build_parser() -> argparse.ArgumentParser:
     p_clean = subparsers.add_parser(
         "clean",
         parents=[base_parser],
-        help="Purge temporary files, logs, and browser sessions",
-        description="Clean temporary media chunks, browser sessions, logs, and JSON cache.",
+        help="Purge cache, logs, and temp files",
+        description="Clean temporary media chunks, browser sessions,\nlogs, and JSON cache.",
+        formatter_class=raw_formatter,
     )
     p_clean.add_argument(
         "--all",
         action="store_true",
-        help="Purge everything including profile JSON cache",
+        help="Purge everything including profile\nJSON cache",
     )
     p_clean.add_argument(
         "--json",
         action="store_true",
         help="Purge only profile JSON metadata cache",
     )
+    p_clean.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Skip confirmation prompt and proceed",
+    )
 
     # Subcommand: login
     subparsers.add_parser(
         "login",
         parents=[base_parser],
-        help="Log in to TikTok via browser and save cookies",
-        description="Opens browser to authenticate and exports session cookies",
+        help="Log in to TikTok and save cookies",
+        description="Opens browser to authenticate and export\nsession cookies.",
+        formatter_class=raw_formatter,
     )
 
     return parser
@@ -227,7 +262,8 @@ def main() -> None:
         reporter = CliReporter(
             mode="live" if cmd == "live" else "mass", verbose=verbose
         )
-        setup_logging(config.logs_dir, verbose=verbose)
+        if cmd != "clean":
+            setup_logging(config.logs_dir, verbose=verbose)
 
         cached: bool = getattr(args, "cached", False)
         needs_browser = cmd in ("batch", "video", "photo", "login") and not cached
@@ -300,11 +336,20 @@ def main() -> None:
             sys.exit(0)
 
         if cmd == "clean":
-            logging.shutdown()
+            mode_str = "ALL" if args.all else ("JSON" if args.json else "TEMP")
+            if not getattr(args, "yes", False):
+                prompt = f"Confirm purging {mode_str.lower()} cache, logs, and temporary files?"
+                if not reporter.ask_confirm(prompt, default=False):
+                    reporter.info("CLEAN_CANCEL Purge cancelled by user")
+                    sys.exit(0)
+
+            for h in logging.root.handlers[:]:
+                logging.root.removeHandler(h)
+                h.close()
+
             files_removed, bytes_freed = clean_cache(
                 config, clean_all=args.all, clean_json=args.json
             )
-            mode_str = "ALL" if args.all else ("JSON" if args.json else "TEMP")
             reporter.info(
                 "CLEAN_DONE mode=%s removed=%d freed=%s",
                 mode_str,
