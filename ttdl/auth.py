@@ -53,7 +53,7 @@ class AuthManager:
         if is_termux():
             from ttdl.termux import setup_termux
 
-            setup_termux()
+            setup_termux(self.reporter)
 
         self.reporter.info("AUTH_START target=tiktok_login")
 

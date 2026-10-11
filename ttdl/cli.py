@@ -235,7 +235,7 @@ def main() -> None:
         if needs_browser and "com.termux" in os.environ.get("PREFIX", ""):
             from ttdl.termux import setup_termux
 
-            setup_termux()
+            setup_termux(reporter)
 
         if cmd in ("batch", "video", "photo", "login"):
             try:

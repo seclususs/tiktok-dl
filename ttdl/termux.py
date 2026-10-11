@@ -7,6 +7,9 @@ import subprocess
 import sys
 import tomllib
 import urllib.request
+from typing import Any
+
+from ttdl.events import Reporter
 
 log = logging.getLogger(__name__)
 
@@ -15,16 +18,28 @@ def is_termux() -> bool:
     return "com.termux" in os.environ.get("PREFIX", "")
 
 
-def setup_termux() -> None:
+def setup_termux(reporter: Reporter | None = None) -> None:
     if not is_termux():
         return
 
+    def _info(msg: str, *args: Any) -> None:
+        if reporter is not None:
+            reporter.info(msg, *args)
+        else:
+            log.info(msg, *args)
+
+    def _error(msg: str, *args: Any) -> None:
+        if reporter is not None:
+            reporter.error(msg, *args)
+        else:
+            log.error(msg, *args)
+
     if not shutil.which("adb"):
-        log.error("adb not found. Please install android-tools.")
+        _error("adb not found. Please install android-tools.")
         sys.exit(1)
 
     if not shutil.which("node"):
-        log.error("nodejs not found. Please install nodejs.")
+        _error("nodejs not found. Please install nodejs.")
         sys.exit(1)
 
     try:
@@ -68,26 +83,26 @@ def setup_termux() -> None:
             and installed_version
             and _vtuple(installed_version) < _vtuple(target_version)
         ):
-            log.info(
+            _info(
                 "PLAYWRIGHT_UPDATE mismatch detected (installed: %s, target: %s)",
                 installed_version,
                 target_version,
             )
             raise ImportError("Version mismatch")
     except ImportError:
-        log.info("PLAYWRIGHT_INSTALL fetching manylinux1_x86_64 wheel...")
+        _info("PLAYWRIGHT_INSTALL fetching manylinux1_x86_64 wheel...")
         try:
             req = urllib.request.Request("https://pypi.org/pypi/playwright/json")
             with urllib.request.urlopen(req) as response:
                 data = json.loads(response.read().decode())
 
-            if "target_version" in locals() and target_version:
+            if target_version:
                 version_to_fetch = target_version
             else:
                 version_to_fetch = data["info"]["version"]
 
             if version_to_fetch not in data["releases"]:
-                log.error("Playwright version %s not found on PyPI.", version_to_fetch)
+                _error("Playwright version %s not found on PyPI.", version_to_fetch)
                 sys.exit(1)
 
             target_url = next(
@@ -101,20 +116,41 @@ def setup_termux() -> None:
             )
 
             if not target_url:
-                log.error("Could not find Playwright manylinux1_x86_64 wheel.")
+                _error("Could not find Playwright manylinux1_x86_64 wheel.")
                 sys.exit(1)
 
             whl_name = f"playwright-{version_to_fetch}-py3-none-any.whl"
-            log.info("PLAYWRIGHT_INSTALL downloading %s...", target_url)
-            urllib.request.urlretrieve(target_url, whl_name)
-            log.info("PLAYWRIGHT_INSTALL running pip install...")
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", whl_name], check=True
+            _info("PLAYWRIGHT_INSTALL downloading %s...", target_url)
+            if reporter is not None:
+                reporter.set_status("Downloading Playwright wheel...")
+            try:
+                urllib.request.urlretrieve(target_url, whl_name)
+            finally:
+                if reporter is not None:
+                    reporter.clear_status()
+
+            _info("PLAYWRIGHT_INSTALL running pip install...")
+            res = subprocess.run(
+                [sys.executable, "-m", "pip", "install", whl_name],
+                capture_output=True,
+                text=True,
+                check=False,
             )
-            os.remove(whl_name)
-            log.info("PLAYWRIGHT_INSTALL success!")
+            if os.path.exists(whl_name):
+                try:
+                    os.remove(whl_name)
+                except OSError:
+                    pass
+
+            if res.returncode != 0:
+                _error("Failed to install Playwright: %s", res.stderr.strip())
+                sys.exit(1)
+
+            _info("PLAYWRIGHT_INSTALL success!")
         except Exception as e:
-            log.error("Failed to install Playwright: %s", e)
+            if reporter is not None:
+                reporter.clear_status()
+            _error("Failed to install Playwright: %s", e)
             sys.exit(1)
 
     node_path = shutil.which("node")
@@ -126,7 +162,7 @@ def setup_termux() -> None:
         ["adb", "devices"], capture_output=True, text=True, check=False
     )
     if "device\n" not in adb_check.stdout and "\tdevice" not in adb_check.stdout:
-        log.error(
+        _error(
             "\n"
             "=================================================\n"
             "                   ADB OFFLINE                   \n"
