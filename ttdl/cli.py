@@ -105,6 +105,12 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Capture ongoing live stream from target username.",
     )
     p_live.add_argument("user", type=str, help="Target TikTok username")
+    p_live.add_argument(
+        "--cookies",
+        type=str,
+        default=None,
+        help="Path to cookies file (Netscape format / cookies.txt)",
+    )
 
     # Subcommand: url
     p_url = subparsers.add_parser(
@@ -172,6 +178,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Purge only profile JSON metadata cache",
     )
 
+    # Subcommand: login
+    subparsers.add_parser(
+        "login",
+        help="Log in to TikTok via browser and save cookies",
+        description="Opens browser to authenticate and exports session cookies",
+    )
+
     return parser
 
 
@@ -188,16 +201,19 @@ def main() -> None:
 
     cmd = args.command
     cached: bool = getattr(args, "cached", False)
-    needs_browser = cmd in ("batch", "video", "photo") and not cached
+    needs_browser = cmd in ("batch", "video", "photo", "login") and not cached
 
     if needs_browser and "com.termux" in os.environ.get("PREFIX", ""):
         from ttdl.termux import setup_termux
 
         setup_termux()
 
-    if cmd in ("batch", "video", "photo"):
+    if cmd in ("batch", "video", "photo", "login"):
         try:
-            from ttdl.mass import TikTokDownloader
+            import playwright  # noqa: F401
+
+            if cmd in ("batch", "video", "photo"):
+                from ttdl.mass import TikTokDownloader
         except ImportError as e:
             print(f"\nMissing dependency '{e.name}'.")
             print("Please install requirements first by running:")
@@ -273,11 +289,21 @@ def main() -> None:
             urls = parse_url_input(url_target)
             sys.exit(DirectDownloader(config, reporter, urls).execute())
 
+        if cmd == "login":
+            from ttdl.auth import AuthManager
+
+            sys.exit(AuthManager(config, reporter).login())
+
         if cmd == "live":
             username: str = args.user
+            cookies_arg = getattr(args, "cookies", None)
             reporter.mode = "live"
             config.validate_dependencies(require_ffmpeg=True)
-            sys.exit(LiveDownloader(username, config, reporter).execute())
+            sys.exit(
+                LiveDownloader(
+                    username, config, reporter, cookies_path=cookies_arg
+                ).execute()
+            )
 
         if cmd in ("batch", "video", "photo"):
             username = args.user
