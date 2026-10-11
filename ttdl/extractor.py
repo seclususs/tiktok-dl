@@ -31,7 +31,7 @@ class ProfileExtractor:
         self.logs_dir = config.logs_dir
         self.usejson = usejson
         self.force = force
-        self.json_dir = self.config.tmp_dir / "json"
+        self.json_dir = self.config.json_dir
         self.json_dir.mkdir(parents=True, exist_ok=True)
         self.json_path = self.json_dir / f"{self.target_username}.json"
 
@@ -417,10 +417,10 @@ class ProfileExtractor:
 
         self._enrich_from_html(html_content, videos_dict)
         if not videos_dict:
-            dump = self.workspace_dir / f"error_dump_{self.target_username}.html"
+            dump = self.logs_dir / f"error_dump_{self.target_username}.html"
             dump.write_text(html_content, encoding="utf-8")
             self.reporter.error("ZERO_POSTS profile empty or blocked")
-            self.reporter.error("DUMP %s", dump.name)
+            self.reporter.error("DUMP %s", dump)
             raise RuntimeError("Profile empty or blocked")
 
         try:

@@ -88,7 +88,11 @@ ttdl url "https://www.tiktok.com/@username/video/123456789"
 ttdl url urls.txt
 ```
 
-Output lands in `downloads/<username>/`.
+Output lands in the standard Downloads folder:
+
+- **Windows**: `%USERPROFILE%\Downloads\ttdl\<username>\`
+- **Linux / macOS**: `~/Downloads/ttdl/<username>/`
+- **Termux (Android)**: `/storage/emulated/0/Download/ttdl/<username>/`
 
 Download Live Stream:
 
@@ -96,29 +100,71 @@ Download Live Stream:
 ttdl live username
 ```
 
-Output lands in `downloads/live/<username>/`.
+Output lands in the standard Downloads folder:
+
+- **Windows**: `%USERPROFILE%\Downloads\ttdl\live\<username>\`
+- **Linux / macOS**: `~/Downloads/ttdl/live/<username>/`
+- **Termux (Android)**: `/storage/emulated/0/Download/ttdl/live/<username>/`
 
 ## Configuration
 
-Tuning constants live in `config.toml`, which is auto-generated
-in the root directory on the first run. Edit this file directly
-to change scraper and download limits.
+Tuning constants live in `config.toml` (located in your user configuration directory):
 
-| Section / Key             | Default   | Meaning                                             |
-| ------------------------- | --------- | --------------------------------------------------- |
-| `min_video_height`        | `1080`    | Min resolution (px). Skips & purges sub-par videos. |
-| `max_video_duration`      | `16`      | Max video length (s). Skips longer clips.           |
-| `scroll_wait_ms`          | `5000`    | Delay (ms) to allow profile grid lazy-loading.      |
-| `max_stale_scrolls`       | `10`      | Max empty scrolls before ending profile scrape.     |
-| `manual_wait_rounds`      | `60`      | Polling attempts during manual captcha/login block. |
-| `manual_wait_interval_ms` | `5000`    | Polling interval (ms). Total wait = 5 mins.         |
-| `musicaldown_max_retries` | `3`       | Max retries to extract URLs from MusicalDown.       |
-| `min_file_size`           | `"100KB"` | Min valid file size (avoids 0-byte error pages).    |
-| `max_file_size`           | `"30MB"`  | Max video file size. Aborts if exceeded.            |
-| `timeout`                 | `60`      | Request timeout (s) per download.                   |
-| `chunk_size`              | `65536`   | Streaming chunk size (bytes).                       |
-| `max_retries`             | `3`       | Max download retries on failure.                    |
-| `executable`              | (Auto)    | Custom browser path (e.g. `C:\...\chrome.exe`).     |
+- **Windows**: `%APPDATA%\ttdl\config.toml`
+- **Linux / macOS**: `~/.config/ttdl/config.toml`
+- **Termux (Android)**: `~/.config/ttdl/config.toml`
+
+Manage configuration directly from the CLI:
+
+```bash
+# Open config in your default text editor
+ttdl config --edit
+
+# Print path to active config file
+ttdl config --path
+
+# Display current configuration
+ttdl config --show
+
+# Get or set a specific configuration value
+ttdl config get max_video_duration
+ttdl config set max_video_duration 60
+
+# Reset configuration to default template
+ttdl config --reset
+```
+
+| Section / Key             | Default            | Meaning                                             |
+| ------------------------- | ------------------ | --------------------------------------------------- |
+| `min_video_height`        | `1080`             | Min resolution (px). Skips & purges sub-par videos. |
+| `max_video_duration`      | `0`                | Max video length (s). `0` for unlimited.            |
+| `scroll_wait_ms`          | `5000`             | Delay (ms) to allow profile grid lazy-loading.      |
+| `max_stale_scrolls`       | `10`               | Max empty scrolls before ending profile scrape.     |
+| `manual_wait_rounds`      | `60`               | Polling attempts during manual captcha/login block. |
+| `manual_wait_interval_ms` | `5000`             | Polling interval (ms). Total wait = 5 mins.         |
+| `musicaldown_max_retries` | `3`                | Max retries to extract URLs from MusicalDown.       |
+| `min_file_size`           | `"100KB"`          | Min valid file size (avoids 0-byte error pages).    |
+| `max_file_size`           | `"30MB"`           | Max video file size. Aborts if exceeded.            |
+| `timeout`                 | `60`               | Request timeout (s) per download.                   |
+| `chunk_size`              | `65536`            | Streaming chunk size (bytes).                       |
+| `max_retries`             | `3`                | Max download retries on failure.                    |
+| `download_dir`            | (Platform default) | Custom path for downloads                           |
+| `executable`              | (Auto)             | Custom browser path (e.g. `C:\...\chrome.exe`).     |
+
+## Cache Management
+
+Clean temporary media chunks, old logs, and browser sessions:
+
+```bash
+# Clean temporary files, logs, and stale browser sessions
+ttdl clean
+
+# Clean everything including cached profile metadata JSON files
+ttdl clean --all
+
+# Clean only profile metadata JSON cache
+ttdl clean --json
+```
 
 ## Disclaimer - Read Before Use
 

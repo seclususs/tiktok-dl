@@ -8,7 +8,7 @@ if "com.termux" in os.environ.get("PREFIX", ""):
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 try:
-    from ttdl.config import AppConfig
+    from ttdl.config import AppConfig, clean_cache, format_size, open_config_editor
     from ttdl.direct import DirectDownloader
     from ttdl.live import LiveDownloader
     from ttdl.logger import setup_logging
@@ -67,7 +67,7 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(
         dest="command",
         title="commands",
-        metavar="{batch,video,photo,live,url}",
+        metavar="{batch,video,photo,live,url,config,clean}",
         required=True,
     )
 
@@ -119,6 +119,59 @@ def _build_parser() -> argparse.ArgumentParser:
         help="TikTok video/photo URL or path to text file listing URLs",
     )
 
+    # Subcommand: config
+    p_config = subparsers.add_parser(
+        "config",
+        help="View, edit, or set configuration values",
+        description="Manage ttdl settings in config",
+    )
+    p_config.add_argument(
+        "action",
+        nargs="?",
+        choices=["show", "path", "edit", "set", "get", "reset"],
+        default="show",
+        help="Config action to perform (default: show)",
+    )
+    p_config.add_argument("key", nargs="?", help="Configuration key (for set/get)")
+    p_config.add_argument("value", nargs="?", help="Value to set (for set)")
+    p_config.add_argument(
+        "--edit",
+        action="store_true",
+        help="Open config file in system text editor",
+    )
+    p_config.add_argument(
+        "--path",
+        action="store_true",
+        help="Print path to active config file",
+    )
+    p_config.add_argument(
+        "--show",
+        action="store_true",
+        help="Print active configuration content",
+    )
+    p_config.add_argument(
+        "--reset",
+        action="store_true",
+        help="Reset configuration to default template",
+    )
+
+    # Subcommand: clean
+    p_clean = subparsers.add_parser(
+        "clean",
+        help="Purge temporary files, logs, and browser sessions",
+        description="Clean temporary media chunks, browser sessions, logs, and JSON cache.",
+    )
+    p_clean.add_argument(
+        "--all",
+        action="store_true",
+        help="Purge everything including profile JSON cache",
+    )
+    p_clean.add_argument(
+        "--json",
+        action="store_true",
+        help="Purge only profile JSON metadata cache",
+    )
+
     return parser
 
 
@@ -152,6 +205,69 @@ def main() -> None:
             sys.exit(1)
 
     try:
+        if cmd == "config":
+            action = args.action
+
+            if args.edit or action == "edit":
+                reporter.info("OPEN_CONFIG %s", config.cfg_path)
+                open_config_editor(config.cfg_path)
+                sys.exit(0)
+
+            if args.path or action == "path":
+                print(str(config.cfg_path))
+                sys.exit(0)
+
+            if args.reset or action == "reset":
+                config.reset_config()
+                reporter.info("CONFIG_RESET %s", config.cfg_path)
+                sys.exit(0)
+
+            if action == "set":
+                if not args.key or args.value is None:
+                    reporter.error("USAGE: ttdl config set <key> <value>")
+                    sys.exit(1)
+
+                success = config.set_setting(args.key, args.value)
+                if success:
+                    reporter.info("CONFIG_SET %s = %s", args.key, args.value)
+                    sys.exit(0)
+                else:
+                    reporter.error("UNKNOWN_KEY or INVALID_VALUE: %s", args.key)
+                    sys.exit(1)
+
+            if action == "get":
+                if not args.key:
+                    reporter.error("USAGE: ttdl config get <key>")
+                    sys.exit(1)
+
+                val = config.get_setting(args.key)
+                if val is not None:
+                    print(val)
+                    sys.exit(0)
+                else:
+                    reporter.error("UNKNOWN_KEY: %s", args.key)
+                    sys.exit(1)
+
+            if config.cfg_path.is_file():
+                print(f"# Active config: {config.cfg_path}\n")
+                print(config.cfg_path.read_text(encoding="utf-8"))
+            else:
+                reporter.warning("Config file not found at %s", config.cfg_path)
+            sys.exit(0)
+
+        if cmd == "clean":
+            files_removed, bytes_freed = clean_cache(
+                config, clean_all=args.all, clean_json=args.json
+            )
+            mode_str = "ALL" if args.all else ("JSON" if args.json else "TEMP")
+            reporter.info(
+                "CLEAN_DONE mode=%s removed=%d freed=%s",
+                mode_str,
+                files_removed,
+                format_size(bytes_freed),
+            )
+            sys.exit(0)
+
         if cmd == "url":
             url_target: str = args.target
             urls = parse_url_input(url_target)
