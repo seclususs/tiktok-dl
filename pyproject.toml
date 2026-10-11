@@ -23,7 +23,7 @@ classifiers = [
 ]
 dependencies = [
     "beautifulsoup4>=4.15.0",
-    'playwright>=1.63.0; sys_platform != "linux" or platform_machine == "x86_64"',
+    'playwright>=1.63.0; sys_platform == "win32" or sys_platform == "darwin" or (sys_platform == "linux" and platform_machine == "x86_64")',
     "requests>=2.34.2",
     "rich>=15.0.0",
     "piexif>=1.1.3",
