@@ -42,6 +42,31 @@ def setup_termux(reporter: Reporter | None = None) -> None:
         _error("nodejs not found. Please install nodejs.")
         sys.exit(1)
 
+    target_version: str | None = None
+    pyproject_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "pyproject.toml",
+    )
+
+    if os.path.exists(pyproject_path):
+        try:
+            with open(pyproject_path, "rb") as f:
+                pdata = tomllib.load(f)
+
+            for dep in pdata.get("project", {}).get("dependencies", []):
+                if dep.startswith("playwright"):
+                    part = dep.split(";")[0].strip()
+                    if ">=" in part:
+                        target_version = part.split(">=")[1].strip()
+                    elif "==" in part:
+                        target_version = part.split("==")[1].strip()
+                    break
+        except Exception:
+            pass
+
+    def _vtuple(v: str) -> tuple[int, ...]:
+        return tuple(int(x) for x in re.findall(r"\d+", v))
+
     try:
         import importlib.util
 
@@ -54,29 +79,6 @@ def setup_termux(reporter: Reporter | None = None) -> None:
             installed_version = version("playwright")
         except Exception:
             installed_version = ""
-
-        target_version = None
-        pyproject_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "pyproject.toml",
-        )
-        if os.path.exists(pyproject_path):
-            try:
-                with open(pyproject_path, "rb") as f:
-                    pdata = tomllib.load(f)
-                for dep in pdata.get("project", {}).get("dependencies", []):
-                    if dep.startswith("playwright"):
-                        part = dep.split(";")[0].strip()
-                        if ">=" in part:
-                            target_version = part.split(">=")[1].strip()
-                        elif "==" in part:
-                            target_version = part.split("==")[1].strip()
-                        break
-            except Exception:
-                pass
-
-        def _vtuple(v: str) -> tuple[int, ...]:
-            return tuple(int(x) for x in re.findall(r"\d+", v))
 
         if (
             target_version
