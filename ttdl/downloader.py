@@ -38,85 +38,104 @@ class MediaDownloader:
         }
 
         temp_dest = dest.with_suffix(dest.suffix + ".download")
+        task_id = None
 
-        for attempt in range(1, self.config.download_max_retries + 1):
-            task_id = None
-            try:
-                resp = requests.get(
-                    url,
-                    stream=True,
-                    headers=headers,
-                    timeout=self.config.download_timeout,
-                )
-                resp.raise_for_status()
-                total = int(resp.headers.get("content-length", "0"))
-                if max_size and total > max_size:
-                    resp.close()
-                    self.reporter.info(
-                        "SIZE_SKIP %s content_length=%dMB exceeds %dMB",
-                        label,
-                        total // 1_000_000,
-                        max_size // 1_000_000,
+        try:
+            for attempt in range(1, self.config.download_max_retries + 1):
+                try:
+                    resp = requests.get(
+                        url,
+                        stream=True,
+                        headers=headers,
+                        timeout=self.config.download_timeout,
                     )
-                    return False
+                    resp.raise_for_status()
 
-                task_id = self.reporter.add_task(
-                    f"[cyan]DL {label}",
-                    total=total if total > 0 else None,
-                )
-                downloaded = 0
-                aborted = False
-                with open(temp_dest, "wb") as f:
-                    for chunk in resp.iter_content(
-                        chunk_size=self.config.download_chunk_size,
-                    ):
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            self.reporter.update_task(task_id, advance=len(chunk))
-                            if max_size and downloaded > max_size:
-                                aborted = True
-                                break
+                    total = int(resp.headers.get("content-length", "0"))
+                    if max_size and total > max_size:
+                        resp.close()
+                        self.reporter.debug(
+                            "SIZE_SKIP %s content_length=%dMB exceeds %dMB",
+                            label,
+                            total // 1_000_000,
+                            max_size // 1_000_000,
+                        )
+                        return False
 
-                self.reporter.remove_task(task_id)
-                if aborted:
-                    self.reporter.info(
-                        "SIZE_SKIP %s downloaded=%dMB exceeds %dMB",
-                        label,
-                        downloaded // 1_000_000,
-                        (max_size or 0) // 1_000_000,
+                    task_id = self.reporter.add_task(
+                        f"[cyan]DL {label}",
+                        total=total if total > 0 else None,
                     )
+                    downloaded = 0
+                    aborted = False
+
+                    with open(temp_dest, "wb") as f:
+                        for chunk in resp.iter_content(
+                            chunk_size=self.config.download_chunk_size,
+                        ):
+                            if chunk:
+                                f.write(chunk)
+                                downloaded += len(chunk)
+                                self.reporter.update_task(task_id, advance=len(chunk))
+                                if max_size and downloaded > max_size:
+                                    aborted = True
+                                    break
+
+                    self.reporter.remove_task(task_id)
+                    task_id = None
+                    if aborted:
+                        self.reporter.debug(
+                            "SIZE_SKIP %s downloaded=%dMB exceeds %dMB",
+                            label,
+                            downloaded // 1_000_000,
+                            (max_size or 0) // 1_000_000,
+                        )
+                        if temp_dest.exists():
+                            temp_dest.unlink()
+                        return False
+
+                    temp_dest.rename(dest)
+                    return True
+                except (
+                    requests.exceptions.Timeout,
+                    requests.exceptions.ConnectionError,
+                    requests.exceptions.ChunkedEncodingError,
+                ) as e:
+                    if task_id is not None:
+                        self.reporter.remove_task(task_id)
+                        task_id = None
+
+                    msg = str(e).split("\n")[0][:80]
+                    self.reporter.warning(
+                        "DL_TIMEOUT %s attempt=%d/%d err=%s",
+                        label,
+                        attempt,
+                        self.config.download_max_retries,
+                        msg,
+                    )
+
                     if temp_dest.exists():
                         temp_dest.unlink()
-                    return False
 
-                temp_dest.rename(dest)
-                return True
-            except (
-                requests.exceptions.Timeout,
-                requests.exceptions.ConnectionError,
-                requests.exceptions.ChunkedEncodingError,
-            ) as e:
-                if task_id is not None:
-                    self.reporter.remove_task(task_id)
-                msg = str(e).split("\n")[0][:80]
-                self.reporter.warning(
-                    "DL_TIMEOUT %s attempt=%d/%d err=%s",
-                    label,
-                    attempt,
-                    self.config.download_max_retries,
-                    msg,
-                )
-                if temp_dest.exists():
+                    if dest.exists():
+                        dest.unlink()
+
+                    if attempt == self.config.download_max_retries:
+                        self.reporter.error(
+                            "DL_FAIL %s max retries exhausted",
+                            label,
+                        )
+                        return False
+
+        finally:
+            if task_id is not None:
+                self.reporter.remove_task(task_id)
+
+            if temp_dest.exists():
+                try:
                     temp_dest.unlink()
-                if dest.exists():
-                    dest.unlink()
-                if attempt == self.config.download_max_retries:
-                    self.reporter.error(
-                        "DL_FAIL %s max retries exhausted",
-                        label,
-                    )
-                    return False
+                except Exception:
+                    pass
 
         return False
 
@@ -127,9 +146,11 @@ class MediaDownloader:
     ) -> None:
         temp_raw = self.tmp_dir / f"temp_raw_{metadata.video_id}.mp4"
         temp_proc = self.tmp_dir / f"temp_proc_{metadata.video_id}.mp4"
+        proc: subprocess.Popen[str] | None = None
+        task_id = None
 
         try:
-            self.reporter.info("DL_START %s", metadata.video_id)
+            self.reporter.debug("DL_START %s", metadata.video_id)
             ok = self._download_file(
                 download_url,
                 temp_raw,
@@ -209,7 +230,7 @@ class MediaDownloader:
                 return
 
             if min(width, height) < self.config.min_video_height:
-                self.reporter.info(
+                self.reporter.debug(
                     "RES_SKIP %s res=%dx%d below %dp",
                     metadata.video_id,
                     width,
@@ -224,7 +245,7 @@ class MediaDownloader:
             is_shifted = (start_time_s < 0.0) or (start_time_s >= 0.110)
 
             if not is_shifted:
-                self.reporter.info(
+                self.reporter.debug(
                     "METADATA %s res=%dx%d start_time=%.3f",
                     metadata.target_filename,
                     width,
@@ -232,7 +253,9 @@ class MediaDownloader:
                     start_time_s,
                 )
                 task_id = self.reporter.add_task(
-                    f"[magenta]METADATA {metadata.video_id}", total=duration_us
+                    f"[magenta]META {metadata.video_id}",
+                    total=duration_us,
+                    is_ffmpeg=True,
                 )
                 proc = subprocess.Popen(
                     [
@@ -254,7 +277,7 @@ class MediaDownloader:
                     universal_newlines=True,
                 )
             else:
-                self.reporter.info(
+                self.reporter.debug(
                     "ENCODE %s res=%dx%d start_time=%.3f -> HEVC",
                     metadata.target_filename,
                     width,
@@ -262,7 +285,9 @@ class MediaDownloader:
                     start_time_s,
                 )
                 task_id = self.reporter.add_task(
-                    f"[magenta]ENCODE {metadata.video_id}", total=duration_us
+                    f"[magenta]ENC {metadata.video_id}",
+                    total=duration_us,
+                    is_ffmpeg=True,
                 )
                 proc = subprocess.Popen(
                     [
@@ -319,7 +344,7 @@ class MediaDownloader:
                 str(metadata.output_path),
                 (metadata.create_time, metadata.create_time),
             )
-            self.reporter.info("DONE %s", metadata.target_filename)
+            self.reporter.debug("DONE %s", metadata.target_filename)
         except subprocess.CalledProcessError:
             self.reporter.error("FFMPEG_FAIL %s", metadata.video_id)
         except Exception as e:
@@ -329,10 +354,30 @@ class MediaDownloader:
                 str(e).split("\n")[0][:120],
             )
         finally:
+            if proc is not None and proc.poll() is None:
+                try:
+                    proc.kill()
+                    proc.wait()
+                except Exception:
+                    pass
+
+            if task_id is not None:
+                try:
+                    self.reporter.remove_task(task_id)
+                except Exception:
+                    pass
+
             if temp_raw.exists():
-                temp_raw.unlink()
+                try:
+                    temp_raw.unlink()
+                except Exception:
+                    pass
+
             if temp_proc.exists():
-                temp_proc.unlink()
+                try:
+                    temp_proc.unlink()
+                except Exception:
+                    pass
 
     def download_photo(
         self,
@@ -341,7 +386,7 @@ class MediaDownloader:
         if photo.output_path.exists():
             return False
 
-        self.reporter.info(
+        self.reporter.debug(
             "DL_PHOTO %s slide=%d",
             photo.post_id,
             photo.slide_index,
@@ -374,12 +419,12 @@ class MediaDownloader:
                 str(photo.output_path),
                 (photo.create_time, photo.create_time),
             )
-            self.reporter.info("DONE %s", photo.target_filename)
+            self.reporter.debug("DONE %s", photo.target_filename)
             return True
         return False
 
     def purge_low_res(self, output_dir: Path) -> None:
-        self.reporter.info(
+        self.reporter.debug(
             "PURGE_SCAN checking existing files for sub-%dp",
             self.config.min_video_height,
         )

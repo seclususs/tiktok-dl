@@ -61,7 +61,7 @@ class AuthManager:
             context = None
             try:
                 if is_termux():
-                    self.reporter.info("BROWSER_INIT mode=termux_cdp")
+                    self.reporter.debug("BROWSER_INIT mode=termux_cdp")
                     subprocess.run(
                         [
                             "adb",
@@ -89,7 +89,7 @@ class AuthManager:
                     session_dir = self.config.session_dir / browser_name
                     session_dir.mkdir(parents=True, exist_ok=True)
 
-                    self.reporter.info(
+                    self.reporter.debug(
                         "BROWSER_INIT browser=%s session=%s",
                         browser_name,
                         session_dir.name,
@@ -112,7 +112,10 @@ class AuthManager:
                 self.reporter.info(
                     "AUTH_WAIT Please log in to your TikTok account in the browser"
                 )
-                self.reporter.info(
+                self.reporter.set_status(
+                    "Waiting for browser login... (Press Ctrl+C to cancel)"
+                )
+                self.reporter.debug(
                     "AUTH_POLL Waiting for authentication... Press Ctrl+C to cancel"
                 )
 
@@ -139,6 +142,7 @@ class AuthManager:
                     except Exception:
                         break
 
+                self.reporter.clear_status()
                 if not authenticated:
                     self.reporter.error(
                         "AUTH_TIMEOUT Login was not completed or timed out"
@@ -157,9 +161,11 @@ class AuthManager:
                 return 0
 
             except KeyboardInterrupt:
+                self.reporter.clear_status()
                 self.reporter.warning("AUTH_CANCEL Login cancelled by user")
                 return 1
             except Exception as e:
+                self.reporter.clear_status()
                 self.reporter.error("AUTH_FAIL %s", str(e))
                 return 1
             finally:

@@ -3,12 +3,12 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 
-def setup_logging(logs_dir: Path) -> None:
+def setup_logging(logs_dir: Path, verbose: bool = False) -> None:
     logs_dir.mkdir(parents=True, exist_ok=True)
     log_file = logs_dir / "ttdl.log"
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="[%X]",
         force=True,

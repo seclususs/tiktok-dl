@@ -29,7 +29,7 @@ class MusicalDownScraper:
         post_url: str,
     ) -> str | None:
         if post_url == self._last_url and self._last_html:
-            self.reporter.info("MUSICALDOWN using cached HTML for %s", post_url)
+            self.reporter.debug("MUSICALDOWN using cached HTML for %s", post_url)
             return self._last_html
 
         session = requests.Session()
@@ -44,7 +44,7 @@ class MusicalDownScraper:
         )
 
         for attempt in range(1, self.config.musicaldown_max_retries + 1):
-            self.reporter.info(
+            self.reporter.debug(
                 "MUSICALDOWN attempt=%d/%d url=%s",
                 attempt,
                 self.config.musicaldown_max_retries,
@@ -79,7 +79,7 @@ class MusicalDownScraper:
                     else:
                         data[name] = str(inp.get("value") or "")
 
-                self.reporter.info("MUSICALDOWN_SUBMIT")
+                self.reporter.debug("MUSICALDOWN_SUBMIT")
                 session.headers.update({"Referer": "https://musicaldown.com/en"})
                 r_post = session.post(action_url, data=data, timeout=15)
                 r_post.raise_for_status()
@@ -105,7 +105,7 @@ class MusicalDownScraper:
                 if attempt == self.config.musicaldown_max_retries:
                     dump = self.logs_dir / f"error_md_{attempt}.html"
                     dump.write_text(html_content, encoding="utf-8")
-                    self.reporter.info("DUMP %s", dump.name)
+                    self.reporter.debug("DUMP %s", dump.name)
                     raise ValueError("MUSICALDOWN_MAX_RETRIES_EXHAUSTED")
                 time.sleep(2)
 
@@ -138,10 +138,10 @@ class MusicalDownScraper:
 
         for href, text in valid_links:
             if "HD" in text:
-                self.reporter.info("MUSICALDOWN_OK link=HD")
+                self.reporter.debug("MUSICALDOWN_OK link=HD")
                 return href
 
-        self.reporter.info("MUSICALDOWN_OK link=%s", valid_links[0][1])
+        self.reporter.debug("MUSICALDOWN_OK link=%s", valid_links[0][1])
         return valid_links[0][0]
 
     def fetch_musicaldown_photos(
@@ -156,7 +156,7 @@ class MusicalDownScraper:
 
         html_upper = html_content.upper()
         if "CONVERT VIDEO NOW" not in html_upper:
-            self.reporter.info("VID_SKIP %s video post detected", post_id)
+            self.reporter.debug("VID_SKIP %s video post detected", post_id)
             return []
 
         soup = BeautifulSoup(html_content, "html.parser")
@@ -180,7 +180,7 @@ class MusicalDownScraper:
             )
             return []
 
-        self.reporter.info("PHOTO_FOUND %s slides=%d", post_id, len(photo_links))
+        self.reporter.debug("PHOTO_FOUND %s slides=%d", post_id, len(photo_links))
 
         base_dt = datetime.fromtimestamp(create_time, tz=UTC)
         photos: list[PhotoMetadata] = []

@@ -100,7 +100,7 @@ class ProfileExtractor:
                     author_name = author
 
                 if author_name and not self._is_target_author(author_name):
-                    self.reporter.info(
+                    self.reporter.debug(
                         "AUTHOR_SKIP id=%s author=%s (target=%s)",
                         vid_id,
                         author_name,
@@ -135,7 +135,7 @@ class ProfileExtractor:
                         "duration": duration,
                     }
 
-            self.reporter.info(
+            self.reporter.debug(
                 "API_INTERCEPT +%d total=%d",
                 len(items),
                 len(videos_dict),
@@ -173,76 +173,86 @@ class ProfileExtractor:
         videos_dict: dict[str, dict[str, Any]],
         cached_ids: set[str],
     ) -> None:
-        self.reporter.info("SCROLL_START collecting video grid")
+        self.reporter.debug("SCROLL_START collecting video grid")
         stale = 0
         round_num = 0
 
-        while True:
-            round_num += 1
-            prev = len(videos_dict)
-            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            page.wait_for_timeout(self.config.scroll_wait_ms)
+        try:
+            while True:
+                round_num += 1
+                self.reporter.set_status(
+                    f"Collecting @{self.target_username} posts: {len(videos_dict)} found (scroll {round_num})"
+                )
+                prev = len(videos_dict)
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                page.wait_for_timeout(self.config.scroll_wait_ms)
 
-            consecutive_known = 0
-            smart_stop_triggered = False
+                consecutive_known = 0
+                smart_stop_triggered = False
 
-            for vl in collect_video_links(page, self.target_username):
-                author = vl.get("author", "")
-                if author and not self._is_target_author(author):
-                    self.reporter.info(
-                        "AUTHOR_SKIP id=%s author=%s (target=%s)",
-                        vl.get("videoId"),
-                        author,
-                        self.target_username,
-                    )
-                    continue
-                vid_id = vl["videoId"]
-                if vid_id not in videos_dict:
-                    videos_dict[vid_id] = {
-                        "id": vid_id,
-                        "author": vl["author"],
-                        "createTime": (
-                            int(vid_id) >> 32
-                            if vid_id.isdigit()
-                            else int(datetime.now(UTC).timestamp())
-                        ),
-                        "post_type": None,
-                        "duration": 0,
-                    }
-                    if not self.force:
-                        consecutive_known = 0
-                elif vid_id in cached_ids:
-                    if not self.force:
-                        consecutive_known += 1
-                        if consecutive_known >= 5:
-                            smart_stop_triggered = True
-                            break
-                else:
-                    if not self.force:
-                        consecutive_known = 0
+                for vl in collect_video_links(page, self.target_username):
+                    author = vl.get("author", "")
+                    if author and not self._is_target_author(author):
+                        self.reporter.debug(
+                            "AUTHOR_SKIP id=%s author=%s (target=%s)",
+                            vl.get("videoId"),
+                            author,
+                            self.target_username,
+                        )
+                        continue
 
-            if smart_stop_triggered:
-                self.reporter.info("SCROLL_STOP consecutive known videos detected")
-                break
+                    vid_id = vl["videoId"]
 
-            delta = len(videos_dict) - prev
-            self.reporter.info(
-                "SCROLL round=%d new=%d total=%d",
-                round_num,
-                delta,
-                len(videos_dict),
-            )
-            if delta == 0:
-                stale += 1
-                if stale >= self.config.max_stale_scrolls:
-                    self.reporter.info(
-                        "SCROLL_DONE %d stale rounds total=%d",
-                        self.config.max_stale_scrolls,
-                        len(videos_dict),
-                    )
+                    if vid_id not in videos_dict:
+                        videos_dict[vid_id] = {
+                            "id": vid_id,
+                            "author": vl["author"],
+                            "createTime": (
+                                int(vid_id) >> 32
+                                if vid_id.isdigit()
+                                else int(datetime.now(UTC).timestamp())
+                            ),
+                            "post_type": None,
+                            "duration": 0,
+                        }
+                        if not self.force:
+                            consecutive_known = 0
+
+                    elif vid_id in cached_ids:
+                        if not self.force:
+                            consecutive_known += 1
+                            if consecutive_known >= 5:
+                                smart_stop_triggered = True
+                                break
+
+                    else:
+                        if not self.force:
+                            consecutive_known = 0
+
+                if smart_stop_triggered:
+                    self.reporter.debug("SCROLL_STOP consecutive known videos detected")
                     break
-            else:
-                stale = 0
+
+                delta = len(videos_dict) - prev
+                self.reporter.debug(
+                    "SCROLL round=%d new=%d total=%d",
+                    round_num,
+                    delta,
+                    len(videos_dict),
+                )
+                if delta == 0:
+                    stale += 1
+                    if stale >= self.config.max_stale_scrolls:
+                        self.reporter.debug(
+                            "SCROLL_DONE %d stale rounds total=%d",
+                            self.config.max_stale_scrolls,
+                            len(videos_dict),
+                        )
+                        break
+                else:
+                    stale = 0
+        finally:
+            self.reporter.clear_status()
 
     def _enrich_from_html(
         self,
@@ -332,7 +342,7 @@ class ProfileExtractor:
         )
 
         try:
-            self.reporter.info("NAV %s", profile_url)
+            self.reporter.debug("NAV %s", profile_url)
             try:
                 page.goto(
                     profile_url,
@@ -360,7 +370,7 @@ class ProfileExtractor:
                     "[green]UNBLOCKED videos detected after intervention",
                 )
 
-            self.reporter.info("WAIT_SHELL user profile elements")
+            self.reporter.debug("WAIT_SHELL user profile elements")
             try:
                 page.wait_for_selector(
                     '[data-e2e="user-page"], [data-e2e="user-title"], script#__UNIVERSAL_DATA_FOR_REHYDRATION__',
@@ -368,19 +378,19 @@ class ProfileExtractor:
                     timeout=30000,
                 )
             except Exception:
-                self.reporter.info("SHELL_TIMEOUT proceeding")
+                self.reporter.debug("SHELL_TIMEOUT proceeding")
 
-            self.reporter.info("CLICK_TAB videos")
+            self.reporter.debug("CLICK_TAB videos")
             try:
                 tab = page.locator('[data-e2e="videos-tab"]')
                 if tab.count() > 0:
                     tab.first.click(force=True)
-                    self.reporter.info("TAB_CLICKED videos")
+                    self.reporter.debug("TAB_CLICKED videos")
                     page.wait_for_timeout(3000)
             except Exception:
                 pass
 
-            self.reporter.info("WAIT_ITEMS video links in DOM")
+            self.reporter.debug("WAIT_ITEMS video links in DOM")
             if count_video_links(page) == 0:
                 try:
                     page.wait_for_selector(

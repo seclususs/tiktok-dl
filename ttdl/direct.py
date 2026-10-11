@@ -99,7 +99,7 @@ class DirectDownloader:
         overall_failed = False
 
         for url in self.urls:
-            self.reporter.info("DIRECT Resolving URL %s", url)
+            self.reporter.debug("DIRECT Resolving URL %s", url)
             try:
                 resolver = UrlResolver(url)
                 data = resolver.resolve()
@@ -143,7 +143,7 @@ class DirectDownloader:
                                 else:
                                     dl.download_and_process_video(pi, dl_url)
                             else:
-                                self.reporter.info("SKIP %s already exists", video_id)
+                                self.reporter.debug("SKIP %s already exists", video_id)
 
                         if post_type == "photo":
                             photos = scraper.fetch_musicaldown_photos(

@@ -220,7 +220,7 @@ class LiveDownloader:
             )
             return 1
 
-        self.reporter.info("COOKIE_LOAD %s", cookie_file)
+        self.reporter.debug("COOKIE_LOAD %s", cookie_file)
         cookie_header = self._load_cookie_header(cookie_file)
 
         # Resolve stream URL
@@ -272,6 +272,16 @@ class LiveDownloader:
                 proc.wait()
             self.reporter.info("STREAM_END file=%s", out_file.name)
             self.reporter.info("EXEC_DONE Live stream recording complete")
+            self.reporter.print_summary(
+                "Live Stream Complete",
+                [
+                    ("Target", f"@{self.target}"),
+                    ("Room ID", str(room_id)),
+                    ("Quality", info_label),
+                    ("Output", str(out_file)),
+                ],
+                style="green",
+            )
             return 0
         except KeyboardInterrupt:
             if proc and proc.poll() is None:
@@ -286,6 +296,16 @@ class LiveDownloader:
                 "REC_INTERRUPT saving recorded stream to %s", out_file.name
             )
             self.reporter.info("EXEC_DONE Live stream recording stopped by user")
+            self.reporter.print_summary(
+                "Live Stream Interrupted",
+                [
+                    ("Target", f"@{self.target}"),
+                    ("Room ID", str(room_id)),
+                    ("Quality", info_label),
+                    ("Output", str(out_file)),
+                ],
+                style="yellow",
+            )
             return 0
         except Exception as e:
             self.reporter.error("REC_FAIL %s", str(e))

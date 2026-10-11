@@ -8,6 +8,7 @@ if "com.termux" in os.environ.get("PREFIX", ""):
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 try:
+    from ttdl import __version__
     from ttdl.config import AppConfig, clean_cache, format_size, open_config_editor
     from ttdl.direct import DirectDownloader
     from ttdl.live import LiveDownloader
@@ -56,24 +57,41 @@ def _add_profile_options(p: argparse.ArgumentParser) -> None:
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    base_parser = argparse.ArgumentParser(add_help=False)
+    base_parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Enable detailed debug logging",
+    )
+
     parser = argparse.ArgumentParser(
         prog="ttdl",
         description="TikTok Downloader - Videos, Photos, and Live Streams",
+        parents=[base_parser],
         formatter_class=lambda prog: argparse.RawTextHelpFormatter(
             prog, max_help_position=32
         ),
+    )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
 
     subparsers = parser.add_subparsers(
         dest="command",
         title="commands",
-        metavar="{batch,video,photo,live,url,config,clean}",
+        metavar="{batch,video,photo,live,url,config,clean,login}",
         required=True,
     )
 
     # Subcommand: batch
     p_batch = subparsers.add_parser(
         "batch",
+        parents=[base_parser],
         help="Download everything (videos and photos) from target profile",
         description="Download all posts (videos, photos, stories) from target username.",
     )
@@ -83,6 +101,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Subcommand: video
     p_video = subparsers.add_parser(
         "video",
+        parents=[base_parser],
         help="Download videos only from target profile",
         description="Download videos only from target username.",
     )
@@ -92,6 +111,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Subcommand: photo
     p_photo = subparsers.add_parser(
         "photo",
+        parents=[base_parser],
         help="Download photos only from target profile",
         description="Download photos only from target username.",
     )
@@ -101,6 +121,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Subcommand: live
     p_live = subparsers.add_parser(
         "live",
+        parents=[base_parser],
         help="Record live stream from target profile",
         description="Capture ongoing live stream from target username.",
     )
@@ -115,6 +136,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Subcommand: url
     p_url = subparsers.add_parser(
         "url",
+        parents=[base_parser],
         help="Download directly from video/photo URL or txt file",
         description="Download directly from a single URL or a file containing URLs.",
     )
@@ -128,6 +150,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Subcommand: config
     p_config = subparsers.add_parser(
         "config",
+        parents=[base_parser],
         help="View, edit, or set configuration values",
         description="Manage ttdl settings in config",
     )
@@ -164,6 +187,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Subcommand: clean
     p_clean = subparsers.add_parser(
         "clean",
+        parents=[base_parser],
         help="Purge temporary files, logs, and browser sessions",
         description="Clean temporary media chunks, browser sessions, logs, and JSON cache.",
     )
@@ -181,6 +205,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # Subcommand: login
     subparsers.add_parser(
         "login",
+        parents=[base_parser],
         help="Log in to TikTok via browser and save cookies",
         description="Opens browser to authenticate and exports session cookies",
     )
@@ -189,38 +214,41 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    workspace_dir = Path.cwd()
-    config = AppConfig(workspace_dir)
-
-    is_live = "live" in sys.argv
-    reporter = CliReporter(mode="live" if is_live else "mass")
-    setup_logging(config.logs_dir)
-
-    parser = _build_parser()
-    args = parser.parse_args()
-
-    cmd = args.command
-    cached: bool = getattr(args, "cached", False)
-    needs_browser = cmd in ("batch", "video", "photo", "login") and not cached
-
-    if needs_browser and "com.termux" in os.environ.get("PREFIX", ""):
-        from ttdl.termux import setup_termux
-
-        setup_termux()
-
-    if cmd in ("batch", "video", "photo", "login"):
-        try:
-            import playwright  # noqa: F401
-
-            if cmd in ("batch", "video", "photo"):
-                from ttdl.mass import TikTokDownloader
-        except ImportError as e:
-            print(f"\nMissing dependency '{e.name}'.")
-            print("Please install requirements first by running:")
-            print("pip install .\n")
-            sys.exit(1)
-
+    reporter: CliReporter | None = None
     try:
+        workspace_dir = Path.cwd()
+        config = AppConfig(workspace_dir)
+
+        parser = _build_parser()
+        args = parser.parse_args()
+
+        verbose: bool = getattr(args, "verbose", False)
+        cmd = args.command
+        reporter = CliReporter(
+            mode="live" if cmd == "live" else "mass", verbose=verbose
+        )
+        setup_logging(config.logs_dir, verbose=verbose)
+
+        cached: bool = getattr(args, "cached", False)
+        needs_browser = cmd in ("batch", "video", "photo", "login") and not cached
+
+        if needs_browser and "com.termux" in os.environ.get("PREFIX", ""):
+            from ttdl.termux import setup_termux
+
+            setup_termux()
+
+        if cmd in ("batch", "video", "photo", "login"):
+            try:
+                import playwright  # noqa: F401
+
+                if cmd in ("batch", "video", "photo"):
+                    from ttdl.mass import TikTokDownloader
+            except ImportError as e:
+                print(f"\nMissing dependency '{e.name}'.")
+                print("Please install requirements first by running:")
+                print("pip install .\n")
+                sys.exit(1)
+
         if cmd == "config":
             action = args.action
 
@@ -323,11 +351,24 @@ def main() -> None:
                     force=args.force,
                 ).execute()
             )
+    except KeyboardInterrupt:
+        if reporter is not None:
+            reporter.clear_status()
+            reporter.warning("INTERRUPT execution aborted by user")
+        else:
+            print("\nINTERRUPT execution aborted by user")
+        sys.exit(130)
     except ValueError as ve:
-        reporter.error(f"FATAL {ve}")
+        if reporter is not None:
+            reporter.error(f"FATAL {ve}")
+        else:
+            print(f"FATAL {ve}")
         sys.exit(1)
     except RuntimeError as re:
-        reporter.error(f"FATAL {re}")
+        if reporter is not None:
+            reporter.error(f"FATAL {re}")
+        else:
+            print(f"FATAL {re}")
         sys.exit(1)
 
 
@@ -335,5 +376,4 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\nINTERRUPT execution aborted by user")
         sys.exit(130)

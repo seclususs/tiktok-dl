@@ -90,7 +90,7 @@ class TikTokDownloader:
         if is_termux():
             import subprocess
 
-            self.reporter.info("BROWSER_INIT mode=termux_cdp")
+            self.reporter.debug("BROWSER_INIT mode=termux_cdp")
             subprocess.run(
                 ["adb", "forward", "tcp:9222", "localabstract:chrome_devtools_remote"],
                 capture_output=True,
@@ -154,12 +154,12 @@ class TikTokDownloader:
             page.add_init_script(js_bypass)
             return cast(BrowserContext, context)
 
-        self.reporter.info(
+        self.reporter.debug(
             "BROWSER_INIT browser=%s session=%s",
             self.browser_name,
             self.session_dir.name,
         )
-        self.reporter.info("BROWSER_PATH %s", self.browser_path)
+        self.reporter.debug("BROWSER_PATH %s", self.browser_path)
 
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(self.session_dir),
@@ -236,7 +236,7 @@ class TikTokDownloader:
             dl_url = scraper.fetch_musicaldown_link(video.url)
             if dl_url == "__IMAGE_POST__":
                 if not do_photo:
-                    self.reporter.info("IMG_SKIP %s image post", video.video_id)
+                    self.reporter.debug("IMG_SKIP %s image post", video.video_id)
                     return 0, 0, 1, []
 
                 photos = scraper.fetch_musicaldown_photos(
@@ -299,26 +299,39 @@ class TikTokDownloader:
         failed_items: list[PostItem] = []
 
         total = len(items)
-        for idx, item in enumerate(items, 1):
-            if item.output_path.exists() and not item.is_photo:
-                skipped += 1
-                continue
+        overall_task = self.reporter.add_task(
+            "[bold green]Overall",
+            total=total,
+            unit="posts",
+        )
 
-            self.reporter.info("PROCESS %d/%d id=%s", idx, total, item.video_id)
+        try:
+            for idx, item in enumerate(items, 1):
+                if item.output_path.exists() and not item.is_photo:
+                    skipped += 1
+                    self.reporter.update_task(overall_task, advance=1)
+                    continue
 
-            if not item.is_photo:
-                vd, pd, sd, fl = self._process_single_video(
-                    item, do_photo=True, scraper=scraper, dl=dl
-                )
-                videos_done += vd
-                photos_done += pd
-                skipped += sd
-                failed_items.extend(fl)
-            else:
-                pd, sd, fl_p = self._process_single_photo_post(item, scraper, dl)
-                photos_done += pd
-                skipped += sd
-                failed_items.extend(fl_p)
+                self.reporter.debug("PROCESS %d/%d id=%s", idx, total, item.video_id)
+
+                if not item.is_photo:
+                    vd, pd, sd, fl = self._process_single_video(
+                        item, do_photo=True, scraper=scraper, dl=dl
+                    )
+                    videos_done += vd
+                    photos_done += pd
+                    skipped += sd
+                    failed_items.extend(fl)
+                else:
+                    pd, sd, fl_p = self._process_single_photo_post(item, scraper, dl)
+                    photos_done += pd
+                    skipped += sd
+                    failed_items.extend(fl_p)
+
+                self.reporter.update_task(overall_task, advance=1)
+        finally:
+            self.reporter.remove_task(overall_task)
+
         return videos_done, photos_done, skipped, failed_items
 
     def _run(
@@ -387,7 +400,7 @@ class TikTokDownloader:
             for v in self._build_video_list(video_posts):
                 dur = video_posts.get(v.video_id, {}).get("duration", 0)
                 if dur > self.config.max_video_duration:
-                    self.reporter.info(
+                    self.reporter.debug(
                         "DUR_SKIP %s duration=%ds exceeds %ds",
                         v.video_id,
                         dur,
@@ -399,7 +412,7 @@ class TikTokDownloader:
 
                 pt = video_posts.get(v.video_id, {}).get("post_type")
                 if pt == "photo":
-                    self.reporter.info("IMG_SKIP %s photo post", v.video_id)
+                    self.reporter.debug("IMG_SKIP %s photo post", v.video_id)
                     skipped += 1
                     processed_ids.add(v.video_id)
                     continue
@@ -411,7 +424,7 @@ class TikTokDownloader:
             photo_posts = {k: v for k, v in posts.items() if k not in processed_ids}
             for post_id, data in photo_posts.items():
                 if data.get("post_type") == "video":
-                    self.reporter.info("VID_SKIP %s video post", post_id)
+                    self.reporter.debug("VID_SKIP %s video post", post_id)
                     skipped += 1
                     continue
 
@@ -457,6 +470,18 @@ class TikTokDownloader:
             photos_done,
             skipped,
             len(failed_items),
+        )
+        self.reporter.print_summary(
+            "Download Summary",
+            [
+                ("Target", f"@{self.target_username}"),
+                ("Videos", str(videos_done)),
+                ("Photos", str(photos_done)),
+                ("Skipped", str(skipped)),
+                ("Failed", str(len(failed_items))),
+                ("Output", str(self.output_dir)),
+            ],
+            style="green" if not failed_items else "yellow",
         )
         return 0
 
