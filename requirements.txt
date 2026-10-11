@@ -1,6 +1,0 @@
-beautifulsoup4==4.15.0
-playwright==1.63.0; sys_platform != "linux" or platform_machine == "x86_64"
-requests==2.34.2
-rich==15.0.0
-yt-dlp==2026.8.19
-piexif==1.1.3

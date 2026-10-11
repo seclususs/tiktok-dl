@@ -1,9 +1,11 @@
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tomllib
 import urllib.request
 
 log = logging.getLogger(__name__)
@@ -38,19 +40,34 @@ def setup_termux() -> None:
         except Exception:
             installed_version = ""
 
-        req_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "requirements.txt",
-        )
         target_version = None
-        if os.path.exists(req_path):
-            with open(req_path, encoding="utf-8") as f:
-                for line in f:
-                    if line.startswith("playwright=="):
-                        target_version = line.split("==")[1].split(";")[0].strip()
+        pyproject_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "pyproject.toml",
+        )
+        if os.path.exists(pyproject_path):
+            try:
+                with open(pyproject_path, "rb") as f:
+                    pdata = tomllib.load(f)
+                for dep in pdata.get("project", {}).get("dependencies", []):
+                    if dep.startswith("playwright"):
+                        part = dep.split(";")[0].strip()
+                        if ">=" in part:
+                            target_version = part.split(">=")[1].strip()
+                        elif "==" in part:
+                            target_version = part.split("==")[1].strip()
                         break
+            except Exception:
+                pass
 
-        if target_version and installed_version != target_version:
+        def _vtuple(v: str) -> tuple[int, ...]:
+            return tuple(int(x) for x in re.findall(r"\d+", v))
+
+        if (
+            target_version
+            and installed_version
+            and _vtuple(installed_version) < _vtuple(target_version)
+        ):
             log.info(
                 "PLAYWRIGHT_UPDATE mismatch detected (installed: %s, target: %s)",
                 installed_version,

@@ -18,7 +18,7 @@ try:
 except ImportError as e:
     print(f"\nMissing dependency '{e.name}'.")
     print("Please install requirements first by running:")
-    print("pip install -r requirements.txt\n")
+    print("pip install .\n")
     sys.exit(1)
 
 
@@ -201,7 +201,7 @@ def main() -> None:
         except ImportError as e:
             print(f"\nMissing dependency '{e.name}'.")
             print("Please install requirements first by running:")
-            print("pip install -r requirements.txt\n")
+            print("pip install .\n")
             sys.exit(1)
 
     try:
