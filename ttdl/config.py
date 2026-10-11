@@ -302,7 +302,12 @@ class AppConfig:
         return True
 
     def validate_dependencies(self, require_ffmpeg: bool = False) -> None:
-        for pattern in ("temp_raw_*.mp4", "temp_proc_*.mp4"):
+        for pattern in (
+            "temp_raw_*.mp4",
+            "temp_proc_*.mp4",
+            "*.download",
+            "*.tmp",
+        ):
             for f in self.tmp_dir.glob(pattern):
                 try:
                     f.unlink(missing_ok=True)
@@ -378,25 +383,40 @@ def clean_cache(
     # Clean JSON cache
     if clean_all or clean_json:
         if config.json_dir.exists():
-            for f in config.json_dir.glob("*.json"):
-                _delete_file(f)
+            for json_file in config.json_dir.glob("*.json"):
+                _delete_file(json_file)
 
     if clean_json and not clean_all:
         return files_removed, bytes_freed
 
     # Clean tmp files
     if config.tmp_dir.exists():
-        for pat in ("temp_raw_*.mp4", "temp_proc_*.mp4", "*.tmp", "*.mp4"):
-            for f in config.tmp_dir.glob(pat):
-                _delete_file(f)
+        for pat in (
+            "temp_raw_*.mp4",
+            "temp_proc_*.mp4",
+            "*.download",
+            "*.tmp",
+            "*.mp4",
+        ):
+            for tmp_file in config.tmp_dir.glob(pat):
+                _delete_file(tmp_file)
 
     # Clean logs
     if config.logs_dir.exists():
-        for f in config.logs_dir.glob("*.log"):
-            _delete_file(f)
+        for pat in ("*.log*", "*.html"):
+            for log_file in config.logs_dir.glob(pat):
+                _delete_file(log_file)
 
     # Clean sessions
     if config.session_dir.exists():
         _delete_dir_contents(config.session_dir)
+
+    # Clean configs and cookies when clean all
+    if clean_all:
+        if config.config_dir.exists():
+            for cfg_name in ("config.toml", "cookies.txt"):
+                cfg_target = config.config_dir / cfg_name
+                if cfg_target.is_file():
+                    _delete_file(cfg_target)
 
     return files_removed, bytes_freed

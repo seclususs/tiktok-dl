@@ -222,7 +222,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_clean.add_argument(
         "--all",
         action="store_true",
-        help="Purge everything including profile\nJSON cache",
+        help="Purge everything including profile\nJSON cache and configs",
     )
     p_clean.add_argument(
         "--json",

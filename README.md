@@ -159,11 +159,20 @@ Clean temporary media chunks, old logs, and browser sessions:
 # Clean temporary files, logs, and stale browser sessions
 ttdl clean
 
-# Clean everything including cached profile metadata JSON files
+# Clean everything including cached profile metadata JSON and configs
 ttdl clean --all
 
 # Clean only profile metadata JSON cache
 ttdl clean --json
+```
+
+## Uninstallation
+
+Purge local cache and configs, then uninstall via pip:
+
+```bash
+ttdl clean --all
+pip uninstall ttdl
 ```
 
 ## Disclaimer - Read Before Use
