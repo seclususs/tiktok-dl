@@ -26,8 +26,11 @@ log = logging.getLogger("ttdl.reporter")
 
 
 class TaskDetailColumn(ProgressColumn):
-    def __init__(self, table_column: Column | None = None) -> None:
+    def __init__(
+        self, table_column: Column | None = None, is_narrow: bool = False
+    ) -> None:
         super().__init__(table_column=table_column)
+        self.is_narrow = is_narrow
 
     def render(self, task: Task) -> Text:
         elapsed = task.finished_time if task.finished else task.elapsed
@@ -40,6 +43,10 @@ class TaskDetailColumn(ProgressColumn):
         unit = task.fields.get("unit")
         if unit in ("posts", "items"):
             total = int(task.total) if task.total is not None else "?"
+            if self.is_narrow:
+                return Text.from_markup(
+                    f"[cyan]{int(task.completed)}/{total} {unit}[/cyan]"
+                )
             return Text.from_markup(
                 f"[dim]•[/dim] [cyan]{int(task.completed)}/{total} {unit}[/cyan] "
                 f"[dim]•[/dim] [dim white]{elapsed_str}[/dim white]"
@@ -48,6 +55,8 @@ class TaskDetailColumn(ProgressColumn):
         elif task.fields.get("is_ffmpeg") or any(
             tag in task.description for tag in ("META", "METADATA", "ENC", "ENCODE")
         ):
+            if self.is_narrow:
+                return Text.from_markup(f"[dim white]{elapsed_str}[/dim white]")
             return Text.from_markup(
                 f"[dim]•[/dim] [dim white]{elapsed_str}[/dim white]"
             )
@@ -55,6 +64,36 @@ class TaskDetailColumn(ProgressColumn):
         else:
             completed = int(task.completed)
             base = int(task.total) if task.total is not None else completed
+
+            if self.is_narrow:
+                u, s = filesize.pick_unit_and_suffix(base, ["B", "K", "M", "G"], 1000)
+
+                def _fmt_val(v: float, unit_factor: int) -> str:
+                    val = v / unit_factor
+                    if unit_factor == 1:
+                        return f"{int(val)}"
+                    return f"{val:.0f}" if val >= 100 else f"{val:.1f}"
+
+                comp_str = _fmt_val(completed, u)
+                tot_str = (
+                    f"{_fmt_val(task.total, u)}{s}"
+                    if task.total is not None
+                    else f"?{s}"
+                )
+
+                speed = task.finished_speed or task.speed
+                if speed is not None and speed > 0:
+                    su, ss = filesize.pick_unit_and_suffix(
+                        int(speed), ["B", "K", "M", "G"], 1000
+                    )
+                    sp_str = f"{_fmt_val(speed, su)}{ss}/s"
+                else:
+                    sp_str = "--/s"
+
+                return Text.from_markup(
+                    f"[cyan]{comp_str}/{tot_str}[/cyan] [dim]•[/dim] [yellow]{sp_str}[/yellow]"
+                )
+
             u, s = filesize.pick_unit_and_suffix(
                 base, ["bytes", "kB", "MB", "GB"], 1000
             )
@@ -80,20 +119,45 @@ class TaskDetailColumn(ProgressColumn):
 
 
 class CliReporter(Reporter):
-    def __init__(self, mode: str = "mass", verbose: bool = False) -> None:
-        self.console = Console()
+    def __init__(
+        self,
+        mode: str = "mass",
+        verbose: bool = False,
+        console: Console | None = None,
+    ) -> None:
+        self.console = console if console is not None else Console()
         self.mode = mode
         self.verbose = verbose
         self._status: Any = None
+        self.is_narrow = self.console.width < 80
+        use_dots = not getattr(self.console, "legacy_windows", False) and (
+            getattr(self.console, "encoding", "").lower() in ("utf-8", "utf8")
+        )
+        spinner = "dots" if use_dots else "line"
         if mode == "live":
             self.progress = Progress(
-                SpinnerColumn(),
+                SpinnerColumn(spinner_name=spinner),
                 TextColumn("[bold cyan]live stream"),
                 TextColumn("[green]{task.fields[size]}"),
                 TextColumn("[yellow]{task.fields[speed]}"),
                 TimeElapsedColumn(),
                 transient=True,
                 console=self.console,
+            )
+        elif self.is_narrow:
+            col_desc = Column(width=12, no_wrap=True, overflow="ellipsis")
+            col_pct = Column(width=5, justify="right", no_wrap=True)
+            col_detail = Column(width=19, no_wrap=True)
+            self.progress = Progress(
+                TextColumn("{task.description}", table_column=col_desc),
+                BarColumn(bar_width=None),
+                TextColumn(
+                    "[progress.percentage]{task.percentage:>3.0f}%",
+                    table_column=col_pct,
+                ),
+                TaskDetailColumn(table_column=col_detail, is_narrow=True),
+                console=self.console,
+                transient=True,
             )
         else:
             col_desc = Column(width=26, no_wrap=True)
@@ -106,7 +170,7 @@ class CliReporter(Reporter):
                     "[progress.percentage]{task.percentage:>5.1f}%",
                     table_column=col_pct,
                 ),
-                TaskDetailColumn(table_column=col_detail),
+                TaskDetailColumn(table_column=col_detail, is_narrow=False),
                 console=self.console,
                 transient=True,
             )
@@ -124,6 +188,9 @@ class CliReporter(Reporter):
 
     def _print(self, level: str, msg: str, level_color: str) -> None:
         time_str = datetime.now(UTC).astimezone().strftime("%X")
+
+        if self.is_narrow and "/data/data/com.termux/files/home" in msg:
+            msg = msg.replace("/data/data/com.termux/files/home", "~")
 
         match = re.match(r"^([A-Z_]+)(.*)", msg)
         if match:
@@ -167,9 +234,15 @@ class CliReporter(Reporter):
     def set_status(self, message: str) -> None:
         if self._is_active:
             return
+        if self.is_narrow and len(message) > 35:
+            message = message[:32] + "..."
         if self._status is None:
+            use_dots = not getattr(self.console, "legacy_windows", False) and (
+                getattr(self.console, "encoding", "").lower() in ("utf-8", "utf8")
+            )
+            spinner = "dots" if use_dots else "line"
             self._status = self.console.status(
-                f"[cyan]{message}[/cyan]", spinner="dots"
+                f"[cyan]{message}[/cyan]", spinner=spinner
             )
             self._status.start()
         else:
@@ -180,6 +253,28 @@ class CliReporter(Reporter):
             self._status.stop()
             self._status = None
 
+    def _format_stat_val(self, val: str) -> str:
+        if not self.is_narrow:
+            return val
+        termux_home = "/data/data/com.termux/files/home"
+        if val.startswith(termux_home):
+            val = "~" + val[len(termux_home) :]
+        else:
+            try:
+                from pathlib import Path
+
+                home = str(Path.home())
+                if home != "/" and val.startswith(home):
+                    val = "~" + val[len(home) :]
+            except Exception:
+                pass
+
+        max_len = max(20, self.console.width - 24)
+        if len(val) > max_len:
+            half = (max_len - 3) // 2
+            val = f"{val[:half]}...{val[-half:]}"
+        return val
+
     def print_summary(
         self, title: str, stats: list[tuple[str, str]], style: str = "cyan"
     ) -> None:
@@ -188,7 +283,7 @@ class CliReporter(Reporter):
         table.add_column(style="bold white", justify="right")
         table.add_column(style="cyan")
         for k, v in stats:
-            table.add_row(f"{k}:", v)
+            table.add_row(f"{k}:", self._format_stat_val(v))
         panel = Panel(
             table,
             title=f"[bold {style}]{title}[/bold {style}]",

@@ -28,6 +28,12 @@ def setup_termux(reporter: Reporter | None = None) -> None:
         else:
             log.info(msg, *args)
 
+    def _debug(msg: str, *args: Any) -> None:
+        if reporter is not None:
+            reporter.debug(msg, *args)
+        else:
+            log.debug(msg, *args)
+
     def _error(msg: str, *args: Any) -> None:
         if reporter is not None:
             reporter.error(msg, *args)
@@ -92,7 +98,7 @@ def setup_termux(reporter: Reporter | None = None) -> None:
             )
             raise ImportError("Version mismatch")
     except ImportError:
-        _info("PLAYWRIGHT_INSTALL fetching manylinux1_x86_64 wheel...")
+        _info("PLAYWRIGHT_INSTALL fetching wheel...")
         try:
             req = urllib.request.Request("https://pypi.org/pypi/playwright/json")
             with urllib.request.urlopen(req) as response:
@@ -122,7 +128,8 @@ def setup_termux(reporter: Reporter | None = None) -> None:
                 sys.exit(1)
 
             whl_name = f"playwright-{version_to_fetch}-py3-none-any.whl"
-            _info("PLAYWRIGHT_INSTALL downloading %s...", target_url)
+            _debug("PLAYWRIGHT_INSTALL url=%s", target_url)
+            _info("PLAYWRIGHT_INSTALL downloading v%s...", version_to_fetch)
             if reporter is not None:
                 reporter.set_status("Downloading Playwright wheel...")
             try:
