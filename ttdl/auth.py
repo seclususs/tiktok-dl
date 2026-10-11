@@ -72,8 +72,22 @@ class AuthManager:
                         capture_output=True,
                         check=False,
                     )
+                    subprocess.run(
+                        [
+                            "adb",
+                            "shell",
+                            "am",
+                            "start",
+                            "-n",
+                            "com.android.chrome/com.google.android.apps.chrome.Main",
+                            "-d",
+                            "about:blank",
+                        ],
+                        capture_output=True,
+                        check=False,
+                    )
 
-                    time.sleep(2)
+                    time.sleep(3)
 
                     try:
                         browser = p.chromium.connect_over_cdp("http://localhost:9222")
