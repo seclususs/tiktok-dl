@@ -385,7 +385,10 @@ class TikTokDownloader:
             }
             for v in self._build_video_list(video_posts):
                 dur = video_posts.get(v.video_id, {}).get("duration", 0)
-                if dur > self.config.max_video_duration:
+                if (
+                    self.config.max_video_duration > 0
+                    and dur > self.config.max_video_duration
+                ):
                     self.reporter.debug(
                         "DUR_SKIP %s duration=%ds exceeds %ds",
                         v.video_id,
