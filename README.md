@@ -134,22 +134,15 @@ ttdl config set max_video_duration 60
 ttdl config --reset
 ```
 
-| Section / Key             | Default            | Meaning                                             |
-| ------------------------- | ------------------ | --------------------------------------------------- |
-| `min_video_height`        | `1080`             | Min resolution (px). Skips & purges sub-par videos. |
-| `max_video_duration`      | `0`                | Max video length (s). `0` for unlimited.            |
-| `scroll_wait_ms`          | `5000`             | Delay (ms) to allow profile grid lazy-loading.      |
-| `max_stale_scrolls`       | `10`               | Max empty scrolls before ending profile scrape.     |
-| `manual_wait_rounds`      | `60`               | Polling attempts during manual captcha/login block. |
-| `manual_wait_interval_ms` | `5000`             | Polling interval (ms). Total wait = 5 mins.         |
-| `musicaldown_max_retries` | `3`                | Max retries to extract URLs from MusicalDown.       |
-| `min_file_size`           | `"100KB"`          | Min valid file size (avoids 0-byte error pages).    |
-| `max_file_size`           | `"30MB"`           | Max video file size. Aborts if exceeded.            |
-| `timeout`                 | `60`               | Request timeout (s) per download.                   |
-| `chunk_size`              | `65536`            | Streaming chunk size (bytes).                       |
-| `max_retries`             | `3`                | Max download retries on failure.                    |
-| `download_dir`            | (Platform default) | Custom path for downloads                           |
-| `executable`              | (Auto)             | Custom browser path (e.g. `C:\...\chrome.exe`).     |
+| Key                  | Default            | Meaning                                             |
+| -------------------- | ------------------ | --------------------------------------------------- |
+| `min_video_height`   | `1080`             | Min resolution (px). Skips & purges sub-par videos. |
+| `max_video_duration` | `0`                | Max video length (s). `0` for unlimited.            |
+| `download_dir`       | (Platform default) | Custom path for downloads.                          |
+| `max_file_size`      | `"30MB"`           | Max video file size. Aborts if exceeded.            |
+| `timeout`            | `60`               | Request timeout (s) per download.                   |
+| `max_retries`        | `3`                | Max download retries on failure.                    |
+| `executable`         | (Auto)             | Custom browser path (e.g. `C:\...\chrome.exe`).     |
 
 ## Cache Management
 

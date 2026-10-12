@@ -103,39 +103,24 @@ def get_active_config_path(workspace_dir: Path | None = None) -> Path:
 DEFAULT_TOML_CONTENT = """[scraper]
 min_video_height = 1080
 max_video_duration = 0
-scroll_wait_ms = 5000
-max_stale_scrolls = 10
-manual_wait_rounds = 60
-manual_wait_interval_ms = 5000
-musicaldown_max_retries = 3
 
 [download]
-min_file_size = "100KB"
+download_dir = ""
 max_file_size = "30MB"
 timeout = 60
-chunk_size = 65536
 max_retries = 3
-# download_dir = ""
 
 [browser]
-# Uncomment to use a custom browser executable path
-# executable = "C:\\\\Program Files\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe"
+executable = ""
 """
 
 CONFIG_SCHEMA: dict[str, tuple[str, type]] = {
     "min_video_height": ("scraper", int),
     "max_video_duration": ("scraper", int),
-    "scroll_wait_ms": ("scraper", int),
-    "max_stale_scrolls": ("scraper", int),
-    "manual_wait_rounds": ("scraper", int),
-    "manual_wait_interval_ms": ("scraper", int),
-    "musicaldown_max_retries": ("scraper", int),
-    "min_file_size": ("download", str),
+    "download_dir": ("download", str),
     "max_file_size": ("download", str),
     "timeout": ("download", int),
-    "chunk_size": ("download", int),
     "max_retries": ("download", int),
-    "download_dir": ("download", str),
     "executable": ("browser", str),
 }
 
@@ -164,6 +149,8 @@ class AppConfig:
     musicaldown_max_retries: int = 3
 
     # Download constraints
+    min_file_size: str = "100KB"
+    max_file_size: str = "30MB"
     min_file_size_bytes: int = 100_000
     max_file_size_bytes: int = 30_000_000
     download_timeout: int = 60
@@ -233,9 +220,11 @@ class AppConfig:
         if "download" in data:
             d = data["download"]
             if "min_file_size" in d:
-                self.min_file_size_bytes = _parse_size(d["min_file_size"])
+                self.min_file_size = str(d["min_file_size"])
+                self.min_file_size_bytes = _parse_size(self.min_file_size)
             if "max_file_size" in d:
-                self.max_file_size_bytes = _parse_size(d["max_file_size"])
+                self.max_file_size = str(d["max_file_size"])
+                self.max_file_size_bytes = _parse_size(self.max_file_size)
             if "download_dir" in d and d["download_dir"]:
                 self.downloads_dir = Path(os.path.expanduser(str(d["download_dir"])))
             self.download_timeout = d.get("timeout", self.download_timeout)
@@ -244,7 +233,7 @@ class AppConfig:
 
         if "browser" in data:
             b = data["browser"]
-            self.browser_executable = b.get("executable")
+            self.browser_executable = b.get("executable") or None
 
     def reset_config(self) -> None:
         try:
@@ -255,10 +244,25 @@ class AppConfig:
 
     def get_setting(self, key: str) -> Any:
         normalized_key = key.split(".")[-1].strip()
-        if normalized_key == "download_dir":
-            return str(self.downloads_dir)
+        if normalized_key not in CONFIG_SCHEMA:
+            return None
 
-        return getattr(self, normalized_key, None)
+        key_map = {
+            "timeout": "download_timeout",
+            "max_retries": "download_max_retries",
+            "executable": "browser_executable",
+            "download_dir": "downloads_dir",
+        }
+        attr = key_map.get(normalized_key, normalized_key)
+        val = getattr(self, attr, None)
+
+        if isinstance(val, Path):
+            return str(val)
+
+        if normalized_key == "executable" and val is None:
+            return ""
+
+        return val
 
     def set_setting(self, raw_key: str, raw_value: str) -> bool:
         normalized_key = raw_key.split(".")[-1].strip()
