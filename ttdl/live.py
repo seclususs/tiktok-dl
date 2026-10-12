@@ -239,6 +239,7 @@ class LiveDownloader:
         live_out_dir.mkdir(parents=True, exist_ok=True)
         timestamp = int(time.time())
         out_file = live_out_dir / f"{self.target}_live_{room_id}_{timestamp}.mp4"
+        raw_file = live_out_dir / f"{self.target}_live_{room_id}_{timestamp}.part.mp4"
 
         tracker = _SizeTracker(self.target, self.config.downloads_dir, self.reporter)
 
@@ -254,8 +255,8 @@ class LiveDownloader:
             "-c",
             "copy",
             "-movflags",
-            "+faststart+frag_keyframe+empty_moov",
-            str(out_file),
+            "+frag_keyframe+empty_moov",
+            str(raw_file),
         ]
 
         self.reporter.info("REC_START target=%s file=%s", self.target, out_file.name)
@@ -271,15 +272,18 @@ class LiveDownloader:
                 )
                 proc.wait()
 
+            tracker.stop()
+
             if proc.returncode != 0 and (
-                not out_file.exists() or out_file.stat().st_size == 0
+                not raw_file.exists() or raw_file.stat().st_size == 0
             ):
-                if out_file.exists():
-                    out_file.unlink(missing_ok=True)
+                if raw_file.exists():
+                    raw_file.unlink(missing_ok=True)
                 self.reporter.error("REC_FAIL FFmpeg recording failed")
                 return 1
 
             self.reporter.info("STREAM_END file=%s", out_file.name)
+            self._finalize_recording(raw_file, out_file)
             self.reporter.info("EXEC_DONE Live stream recording complete")
             self.reporter.print_summary(
                 "Live Stream Complete",
@@ -293,6 +297,7 @@ class LiveDownloader:
             )
             return 0
         except KeyboardInterrupt:
+            tracker.stop()
             if proc and proc.poll() is None:
                 try:
                     if proc.stdin:
@@ -304,6 +309,7 @@ class LiveDownloader:
             self.reporter.info(
                 "REC_INTERRUPT saving recorded stream to %s", out_file.name
             )
+            self._finalize_recording(raw_file, out_file)
             self.reporter.info("EXEC_DONE Live stream recording stopped by user")
             self.reporter.print_summary(
                 "Live Stream Interrupted",
@@ -317,10 +323,51 @@ class LiveDownloader:
             )
             return 0
         except Exception as e:
+            tracker.stop()
+            if raw_file.exists() and not out_file.exists():
+                self._finalize_recording(raw_file, out_file)
             self.reporter.error("REC_FAIL %s", str(e))
             return 1
         finally:
             tracker.stop()
+
+    def _finalize_recording(self, raw_file: Path, final_file: Path) -> None:
+        if not raw_file.exists() or raw_file.stat().st_size == 0:
+            return
+
+        self.reporter.info("FINALIZE Finalizing recording...")
+        remux_cmd = [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            str(raw_file),
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(final_file),
+        ]
+
+        try:
+            res = subprocess.run(
+                remux_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if (
+                res.returncode == 0
+                and final_file.exists()
+                and final_file.stat().st_size > 0
+            ):
+                raw_file.unlink(missing_ok=True)
+                return
+        except Exception:
+            pass
+
+        if raw_file.exists():
+            raw_file.replace(final_file)
 
     def _fetch_json(self, url: str, headers: dict[str, str]) -> dict[str, Any]:
         try:
