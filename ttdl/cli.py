@@ -4,7 +4,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 if "com.termux" in os.environ.get("PREFIX", ""):
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -101,7 +101,7 @@ def _add_profile_options(p: argparse.ArgumentParser) -> None:
 
 
 def _build_batch_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: Any,
     base_parser: argparse.ArgumentParser,
 ) -> None:
     p_batch = subparsers.add_parser(
@@ -116,7 +116,7 @@ def _build_batch_parser(
 
 
 def _build_video_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: Any,
     base_parser: argparse.ArgumentParser,
 ) -> None:
     p_video = subparsers.add_parser(
@@ -131,7 +131,7 @@ def _build_video_parser(
 
 
 def _build_photo_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: Any,
     base_parser: argparse.ArgumentParser,
 ) -> None:
     p_photo = subparsers.add_parser(
@@ -146,7 +146,7 @@ def _build_photo_parser(
 
 
 def _build_live_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: Any,
     base_parser: argparse.ArgumentParser,
 ) -> None:
     p_live = subparsers.add_parser(
@@ -166,7 +166,7 @@ def _build_live_parser(
 
 
 def _build_url_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: Any,
     base_parser: argparse.ArgumentParser,
 ) -> None:
     p_url = subparsers.add_parser(
@@ -185,7 +185,7 @@ def _build_url_parser(
 
 
 def _build_config_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: Any,
     base_parser: argparse.ArgumentParser,
 ) -> None:
     p_config = subparsers.add_parser(
@@ -228,7 +228,7 @@ def _build_config_parser(
 
 
 def _build_clean_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: Any,
     base_parser: argparse.ArgumentParser,
 ) -> None:
     p_clean = subparsers.add_parser(
@@ -257,7 +257,7 @@ def _build_clean_parser(
 
 
 def _build_login_parser(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    subparsers: Any,
     base_parser: argparse.ArgumentParser,
 ) -> None:
     subparsers.add_parser(
