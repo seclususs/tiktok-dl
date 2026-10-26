@@ -203,7 +203,7 @@ def _select_highest_quality_stream(
     candidates.sort(key=lambda c: (c["tier"], c["pixels"], c["vbitrate"]), reverse=True)
     best = candidates[0]
     details_str = _format_stream_details(best["resolution"], best["vbitrate"])
-    return str(best["name"]), str(best["url"]), details_str
+    return str(best["url"]), str(best["name"]), details_str
 
 
 class LiveDownloader:
@@ -437,14 +437,19 @@ class LiveDownloader:
 
         self.reporter.info("REC_START target=%s file=%s", self.target, out_file.name)
         proc: subprocess.Popen[bytes] | None = None
+
+        err_log = self.config.tmp_dir / f"ffmpeg_live_{timestamp}.log"
+        err_file = None
+
         try:
             with self.reporter:
                 tracker.start()
+                err_file = open(err_log, "w+", encoding="utf-8", errors="replace")
                 proc = subprocess.Popen(
                     cmd,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stderr=err_file,
                 )
                 proc.wait()
 
@@ -455,7 +460,23 @@ class LiveDownloader:
             ):
                 if raw_file.exists():
                     raw_file.unlink(missing_ok=True)
-                self.reporter.error("REC_FAIL FFmpeg recording failed")
+
+                err_detail = ""
+                if err_log.exists():
+                    try:
+                        lines = [
+                            ln.strip()
+                            for ln in err_log.read_text(
+                                encoding="utf-8", errors="replace"
+                            ).splitlines()
+                            if ln.strip()
+                        ]
+                        if lines:
+                            err_detail = f": {lines[-1]}"
+                    except Exception:
+                        pass
+
+                self.reporter.error("REC_FAIL FFmpeg recording failed%s", err_detail)
                 return 1
 
             self.reporter.info("STREAM_END file=%s", out_file.name)
@@ -506,6 +527,16 @@ class LiveDownloader:
             return 1
         finally:
             tracker.stop()
+            if err_file and not err_file.closed:
+                try:
+                    err_file.close()
+                except Exception:
+                    pass
+            if err_log.exists():
+                try:
+                    err_log.unlink()
+                except Exception:
+                    pass
 
 
 class _SizeTracker:
