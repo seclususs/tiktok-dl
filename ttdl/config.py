@@ -6,38 +6,84 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 from ttdl.termux import is_termux
 
+BYTES_PER_KB: Final[int] = 1024
+BYTES_PER_MB: Final[int] = 1024 * 1024
+BYTES_PER_GB: Final[int] = 1024 * 1024 * 1024
+
+DEFAULT_TOML_CONTENT: Final[str] = """[scraper]
+min_video_height = 1080
+max_video_duration = 0
+
+[download]
+download_dir = ""
+max_file_size = "30MB"
+timeout = 60
+max_retries = 3
+
+[browser]
+executable = ""
+"""
+
+CONFIG_SCHEMA: Final[dict[str, tuple[str, type]]] = {
+    "min_video_height": ("scraper", int),
+    "max_video_duration": ("scraper", int),
+    "download_dir": ("download", str),
+    "max_file_size": ("download", str),
+    "timeout": ("download", int),
+    "max_retries": ("download", int),
+    "executable": ("browser", str),
+}
+
+CONFIG_ATTR_MAP: Final[dict[str, str]] = {
+    "timeout": "download_timeout",
+    "max_retries": "download_max_retries",
+    "executable": "browser_executable",
+    "download_dir": "downloads_dir",
+}
+
+TMP_CLEAN_PATTERNS: Final[tuple[str, ...]] = (
+    "temp_raw_*.mp4",
+    "temp_proc_*.mp4",
+    "*.download",
+    "*.tmp",
+    "*.mp4",
+)
+
+LOG_CLEAN_PATTERNS: Final[tuple[str, ...]] = ("*.log*", "*.html")
+CONFIG_CLEAN_FILES: Final[tuple[str, ...]] = ("config.toml", "cookies.txt")
+
 
 def _parse_size(size_str: str) -> int:
-    size_str = size_str.upper().strip()
+    raw = size_str.upper().strip()
 
-    if size_str.endswith("MB"):
-        return int(float(size_str[:-2]) * 1024 * 1024)
+    if raw.endswith("GB"):
+        return int(float(raw[:-2]) * BYTES_PER_GB)
 
-    if size_str.endswith("KB"):
-        return int(float(size_str[:-2]) * 1024)
+    if raw.endswith("MB"):
+        return int(float(raw[:-2]) * BYTES_PER_MB)
 
-    if size_str.endswith("GB"):
-        return int(float(size_str[:-2]) * 1024 * 1024 * 1024)
+    if raw.endswith("KB"):
+        return int(float(raw[:-2]) * BYTES_PER_KB)
 
-    if size_str.endswith("B"):
-        return int(size_str[:-1])
+    if raw.endswith("B"):
+        return int(raw[:-1])
 
-    return int(size_str)
+    return int(raw)
 
 
 def format_size(num_bytes: int) -> str:
-    if num_bytes >= 1024 * 1024 * 1024:
-        return f"{num_bytes / (1024 * 1024 * 1024):.2f} GB"
+    if num_bytes >= BYTES_PER_GB:
+        return f"{num_bytes / BYTES_PER_GB:.2f} GB"
 
-    if num_bytes >= 1024 * 1024:
-        return f"{num_bytes / (1024 * 1024):.2f} MB"
+    if num_bytes >= BYTES_PER_MB:
+        return f"{num_bytes / BYTES_PER_MB:.2f} MB"
 
-    if num_bytes >= 1024:
-        return f"{num_bytes / 1024:.2f} KB"
+    if num_bytes >= BYTES_PER_KB:
+        return f"{num_bytes / BYTES_PER_KB:.2f} KB"
 
     return f"{num_bytes} B"
 
@@ -80,13 +126,12 @@ def get_default_downloads_dir() -> Path:
     if is_termux():
         return Path("/storage/emulated/0/Download/ttdl")
 
-    if sys.platform != "win32" and sys.platform != "darwin":
+    if sys.platform not in ("win32", "darwin"):
         xdg_dl = os.environ.get("XDG_DOWNLOAD_DIR")
         if xdg_dl and os.path.isdir(xdg_dl):
             return Path(xdg_dl) / "ttdl"
 
-    home_downloads = Path.home() / "Downloads"
-    return home_downloads / "ttdl"
+    return Path.home() / "Downloads" / "ttdl"
 
 
 def get_active_config_path(workspace_dir: Path | None = None) -> Path:
@@ -98,31 +143,6 @@ def get_active_config_path(workspace_dir: Path | None = None) -> Path:
         return cwd_cfg
 
     return get_config_dir() / "config.toml"
-
-
-DEFAULT_TOML_CONTENT = """[scraper]
-min_video_height = 1080
-max_video_duration = 0
-
-[download]
-download_dir = ""
-max_file_size = "30MB"
-timeout = 60
-max_retries = 3
-
-[browser]
-executable = ""
-"""
-
-CONFIG_SCHEMA: dict[str, tuple[str, type]] = {
-    "min_video_height": ("scraper", int),
-    "max_video_duration": ("scraper", int),
-    "download_dir": ("download", str),
-    "max_file_size": ("download", str),
-    "timeout": ("download", int),
-    "max_retries": ("download", int),
-    "executable": ("browser", str),
-}
 
 
 @dataclass
@@ -175,18 +195,59 @@ class AppConfig:
         self._ensure_folders()
 
     def _ensure_folders(self) -> None:
-        for folder in (
+        folders = (
             self.downloads_dir,
             self.tmp_dir,
             self.logs_dir,
             self.session_dir,
             self.json_dir,
             self.config_dir,
-        ):
+        )
+        for folder in folders:
             try:
                 folder.mkdir(parents=True, exist_ok=True)
             except OSError:
                 pass
+
+    def _load_scraper_section(self, section: dict[str, Any]) -> None:
+        self.min_video_height = section.get("min_video_height", self.min_video_height)
+        self.max_video_duration = section.get(
+            "max_video_duration", self.max_video_duration
+        )
+        self.scroll_wait_ms = section.get("scroll_wait_ms", self.scroll_wait_ms)
+        self.max_stale_scrolls = section.get(
+            "max_stale_scrolls", self.max_stale_scrolls
+        )
+        self.manual_wait_rounds = section.get(
+            "manual_wait_rounds", self.manual_wait_rounds
+        )
+        self.manual_wait_interval_ms = section.get(
+            "manual_wait_interval_ms", self.manual_wait_interval_ms
+        )
+        self.musicaldown_max_retries = section.get(
+            "musicaldown_max_retries", self.musicaldown_max_retries
+        )
+
+    def _load_download_section(self, section: dict[str, Any]) -> None:
+        if "min_file_size" in section:
+            self.min_file_size = str(section["min_file_size"])
+            self.min_file_size_bytes = _parse_size(self.min_file_size)
+
+        if "max_file_size" in section:
+            self.max_file_size = str(section["max_file_size"])
+            self.max_file_size_bytes = _parse_size(self.max_file_size)
+
+        if section.get("download_dir"):
+            self.downloads_dir = Path(os.path.expanduser(str(section["download_dir"])))
+
+        self.download_timeout = section.get("timeout", self.download_timeout)
+        self.download_chunk_size = section.get("chunk_size", self.download_chunk_size)
+        self.download_max_retries = section.get(
+            "max_retries", self.download_max_retries
+        )
+
+    def _load_browser_section(self, section: dict[str, Any]) -> None:
+        self.browser_executable = section.get("executable") or None
 
     def _load_toml(self) -> None:
         self.downloads_dir = get_default_downloads_dir()
@@ -200,40 +261,13 @@ class AppConfig:
             return
 
         if "scraper" in data:
-            s = data["scraper"]
-            self.min_video_height = s.get("min_video_height", self.min_video_height)
-            self.max_video_duration = s.get(
-                "max_video_duration", self.max_video_duration
-            )
-            self.scroll_wait_ms = s.get("scroll_wait_ms", self.scroll_wait_ms)
-            self.max_stale_scrolls = s.get("max_stale_scrolls", self.max_stale_scrolls)
-            self.manual_wait_rounds = s.get(
-                "manual_wait_rounds", self.manual_wait_rounds
-            )
-            self.manual_wait_interval_ms = s.get(
-                "manual_wait_interval_ms", self.manual_wait_interval_ms
-            )
-            self.musicaldown_max_retries = s.get(
-                "musicaldown_max_retries", self.musicaldown_max_retries
-            )
+            self._load_scraper_section(data["scraper"])
 
         if "download" in data:
-            d = data["download"]
-            if "min_file_size" in d:
-                self.min_file_size = str(d["min_file_size"])
-                self.min_file_size_bytes = _parse_size(self.min_file_size)
-            if "max_file_size" in d:
-                self.max_file_size = str(d["max_file_size"])
-                self.max_file_size_bytes = _parse_size(self.max_file_size)
-            if "download_dir" in d and d["download_dir"]:
-                self.downloads_dir = Path(os.path.expanduser(str(d["download_dir"])))
-            self.download_timeout = d.get("timeout", self.download_timeout)
-            self.download_chunk_size = d.get("chunk_size", self.download_chunk_size)
-            self.download_max_retries = d.get("max_retries", self.download_max_retries)
+            self._load_download_section(data["download"])
 
         if "browser" in data:
-            b = data["browser"]
-            self.browser_executable = b.get("executable") or None
+            self._load_browser_section(data["browser"])
 
     def reset_config(self) -> None:
         try:
@@ -247,13 +281,7 @@ class AppConfig:
         if normalized_key not in CONFIG_SCHEMA:
             return None
 
-        key_map = {
-            "timeout": "download_timeout",
-            "max_retries": "download_max_retries",
-            "executable": "browser_executable",
-            "download_dir": "downloads_dir",
-        }
-        attr = key_map.get(normalized_key, normalized_key)
+        attr = CONFIG_ATTR_MAP.get(normalized_key, normalized_key)
         val = getattr(self, attr, None)
 
         if isinstance(val, Path):
@@ -271,13 +299,10 @@ class AppConfig:
 
         section, target_type = CONFIG_SCHEMA[normalized_key]
         try:
-            val_to_store: Any
             if target_type is int:
-                val_to_store = int(raw_value)
-                rendered = str(val_to_store)
+                rendered = str(int(raw_value))
             else:
-                val_to_store = str(raw_value).strip("'\"")
-                rendered = f'"{val_to_store}"'
+                rendered = f'"{str(raw_value).strip(chr(39) + chr(34))}"'
         except ValueError:
             return False
 
@@ -306,12 +331,13 @@ class AppConfig:
         return True
 
     def validate_dependencies(self, require_ffmpeg: bool = False) -> None:
-        for pattern in (
+        clean_patterns = (
             "temp_raw_*.mp4",
             "temp_proc_*.mp4",
             "*.download",
             "*.tmp",
-        ):
+        )
+        for pattern in clean_patterns:
             for f in self.tmp_dir.glob(pattern):
                 try:
                     f.unlink(missing_ok=True)
@@ -355,72 +381,78 @@ def open_config_editor(cfg_path: Path) -> None:
             return
 
 
+def _purge_file(p: Path) -> tuple[int, int]:
+    try:
+        if p.is_file():
+            size = p.stat().st_size
+            p.unlink(missing_ok=True)
+            return 1, size
+    except OSError:
+        pass
+
+    return 0, 0
+
+
+def _purge_directory_contents(d: Path) -> tuple[int, int]:
+    if not d.exists():
+        return 0, 0
+
+    removed = 0
+    freed = 0
+
+    for root, dirs, files in os.walk(d, topdown=False):
+        for name in files:
+            r, b = _purge_file(Path(root) / name)
+            removed += r
+            freed += b
+
+        for name in dirs:
+            try:
+                (Path(root) / name).rmdir()
+            except OSError:
+                pass
+
+    return removed, freed
+
+
 def clean_cache(
     config: AppConfig, clean_all: bool = False, clean_json: bool = False
 ) -> tuple[int, int]:
     files_removed = 0
     bytes_freed = 0
 
-    def _delete_file(p: Path) -> None:
+    def _track(count: int, bytes_count: int) -> None:
         nonlocal files_removed, bytes_freed
-        try:
-            if p.is_file():
-                size = p.stat().st_size
-                p.unlink(missing_ok=True)
-                bytes_freed += size
-                files_removed += 1
-        except OSError:
-            pass
-
-    def _delete_dir_contents(d: Path) -> None:
-        if not d.exists():
-            return
-        for root, dirs, files in os.walk(d, topdown=False):
-            for name in files:
-                _delete_file(Path(root) / name)
-            for name in dirs:
-                try:
-                    (Path(root) / name).rmdir()
-                except OSError:
-                    pass
+        files_removed += count
+        bytes_freed += bytes_count
 
     # Clean JSON cache
-    if clean_all or clean_json:
-        if config.json_dir.exists():
-            for json_file in config.json_dir.glob("*.json"):
-                _delete_file(json_file)
+    if (clean_all or clean_json) and config.json_dir.exists():
+        for json_file in config.json_dir.glob("*.json"):
+            _track(*_purge_file(json_file))
 
     if clean_json and not clean_all:
         return files_removed, bytes_freed
 
-    # Clean tmp files
+    # Clean temporary downloads and fragments
     if config.tmp_dir.exists():
-        for pat in (
-            "temp_raw_*.mp4",
-            "temp_proc_*.mp4",
-            "*.download",
-            "*.tmp",
-            "*.mp4",
-        ):
+        for pat in TMP_CLEAN_PATTERNS:
             for tmp_file in config.tmp_dir.glob(pat):
-                _delete_file(tmp_file)
+                _track(*_purge_file(tmp_file))
 
     # Clean logs
     if config.logs_dir.exists():
-        for pat in ("*.log*", "*.html"):
+        for pat in LOG_CLEAN_PATTERNS:
             for log_file in config.logs_dir.glob(pat):
-                _delete_file(log_file)
+                _track(*_purge_file(log_file))
 
-    # Clean sessions
+    # Clean browser sessions
     if config.session_dir.exists():
-        _delete_dir_contents(config.session_dir)
+        _track(*_purge_directory_contents(config.session_dir))
 
     # Clean configs and cookies when clean all
-    if clean_all:
-        if config.config_dir.exists():
-            for cfg_name in ("config.toml", "cookies.txt"):
-                cfg_target = config.config_dir / cfg_name
-                if cfg_target.is_file():
-                    _delete_file(cfg_target)
+    if clean_all and config.config_dir.exists():
+        for cfg_name in CONFIG_CLEAN_FILES:
+            _track(*_purge_file(config.config_dir / cfg_name))
 
     return files_removed, bytes_freed

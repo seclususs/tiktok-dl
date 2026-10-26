@@ -1,8 +1,10 @@
 import logging
+import subprocess
+import time
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, Final
 
-from playwright.sync_api import BrowserContext, sync_playwright
+from playwright.sync_api import BrowserContext, Playwright, sync_playwright
 
 from ttdl.browser import detect_browser
 from ttdl.config import AppConfig
@@ -10,10 +12,38 @@ from ttdl.downloader import MediaDownloader
 from ttdl.events import Reporter
 from ttdl.extractor import ProfileExtractor
 from ttdl.models import DateFilter, PostItem
-from ttdl.scraper import MusicalDownScraper
+from ttdl.scraper import IMAGE_POST_MARKER, MusicalDownScraper
 from ttdl.termux import is_termux
 
 log = logging.getLogger(__name__)
+
+EDGE_USER_AGENT: Final[str] = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 Chrome/127.0.0.0 Safari/537.36 Edg/127.0.0.0"
+)
+CHROME_USER_AGENT: Final[str] = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 Chrome/127.0.0.0 Safari/537.36"
+)
+CDP_ENDPOINT: Final[str] = "http://localhost:9222"
+JS_WEBDRIVER_BYPASS: Final[str] = (
+    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+)
+JS_MOBILE_BYPASS: Final[str] = """
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0});
+delete window.ontouchstart;
+"""
+
+
+def _resolve_author_string(author: Any, default_username: str) -> str:
+    if isinstance(author, dict) and "uniqueId" in author:
+        return str(author["uniqueId"])
+
+    if isinstance(author, str) and author.strip():
+        return author.strip()
+
+    return default_username
 
 
 class TikTokDownloader:
@@ -50,8 +80,7 @@ class TikTokDownloader:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def _apply_date_filter(
-        self,
-        posts: dict[str, dict[str, Any]],
+        self, posts: dict[str, dict[str, Any]]
     ) -> dict[str, dict[str, Any]]:
         if not self.date_filter:
             return posts
@@ -67,93 +96,77 @@ class TikTokDownloader:
                 filtered[k] = v
 
         self.reporter.info(
-            "DATE_FILTER %d->%d posts in range",
-            len(posts),
-            len(filtered),
+            "DATE_FILTER %d->%d posts in range", len(posts), len(filtered)
         )
         return filtered
 
     def _browser_user_agent(self) -> str:
-        if self.browser_name == "edge":
-            return (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-                " AppleWebKit/537.36 Chrome/127.0.0.0"
-                " Safari/537.36 Edg/127.0.0.0"
-            )
-        return (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-            " AppleWebKit/537.36 Chrome/127.0.0.0"
-            " Safari/537.36"
+        return EDGE_USER_AGENT if self.browser_name == "edge" else CHROME_USER_AGENT
+
+    def _launch_termux_browser(self, p: Playwright) -> BrowserContext:
+        self.reporter.debug("BROWSER_INIT mode=termux_cdp")
+        subprocess.run(
+            [
+                "adb",
+                "forward",
+                "tcp:9222",
+                "localabstract:chrome_devtools_remote",
+            ],
+            capture_output=True,
+            check=False,
         )
+        subprocess.run(
+            [
+                "adb",
+                "shell",
+                "am",
+                "start",
+                "-n",
+                "com.android.chrome/com.google.android.apps.chrome.Main",
+                "-d",
+                "about:blank",
+            ],
+            capture_output=True,
+            check=False,
+        )
+        time.sleep(3)
+        try:
+            browser = p.chromium.connect_over_cdp(CDP_ENDPOINT)
+        except Exception:
+            self.reporter.error("CDP_FAIL Failed to connect to Android Chrome")
+            raise
 
-    def _launch_browser(self, p: Any) -> BrowserContext:
-        if is_termux():
-            import subprocess
+        context = browser.contexts[0]
+        if context.pages:
+            page = context.pages[0]
+            for tab in context.pages[1:]:
+                try:
+                    tab.close()
+                except Exception:
+                    pass
+        else:
+            page = context.new_page()
 
-            self.reporter.debug("BROWSER_INIT mode=termux_cdp")
-            subprocess.run(
-                ["adb", "forward", "tcp:9222", "localabstract:chrome_devtools_remote"],
-                capture_output=True,
-                check=False,
-            )
-            subprocess.run(
-                [
-                    "adb",
-                    "shell",
-                    "am",
-                    "start",
-                    "-n",
-                    "com.android.chrome/com.google.android.apps.chrome.Main",
-                    "-d",
-                    "about:blank",
-                ],
-                capture_output=True,
-                check=False,
-            )
-            import time
-
-            time.sleep(3)
-            try:
-                browser = p.chromium.connect_over_cdp("http://localhost:9222")
-            except Exception:
-                self.reporter.error("CDP_FAIL Failed to connect to Android Chrome")
-                raise
-
-            context = browser.contexts[0]
-            if context.pages:
-                page = context.pages[0]
-                for tab in context.pages[1:]:
-                    try:
-                        tab.close()
-                    except Exception:
-                        pass
-            else:
-                page = context.new_page()
-
-            client = context.new_cdp_session(page)
-            client.send(
-                "Network.setUserAgentOverride",
-                {
-                    "userAgent": self._browser_user_agent(),
-                    "platform": "Win32",
-                    "userAgentMetadata": {
-                        "architecture": "x86",
-                        "bitness": "64",
-                        "mobile": False,
-                        "model": "",
-                        "platform": "Windows",
-                        "platformVersion": "10.0.0",
-                    },
+        client = context.new_cdp_session(page)
+        client.send(
+            "Network.setUserAgentOverride",
+            {
+                "userAgent": self._browser_user_agent(),
+                "platform": "Win32",
+                "userAgentMetadata": {
+                    "architecture": "x86",
+                    "bitness": "64",
+                    "mobile": False,
+                    "model": "",
+                    "platform": "Windows",
+                    "platformVersion": "10.0.0",
                 },
-            )
-            js_bypass = """
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            Object.defineProperty(navigator, 'maxTouchPoints', {get: () => 0});
-            delete window.ontouchstart;
-            """
-            page.add_init_script(js_bypass)
-            return cast(BrowserContext, context)
+            },
+        )
+        page.add_init_script(JS_MOBILE_BYPASS)
+        return context
 
+    def _launch_desktop_browser(self, p: Playwright) -> BrowserContext:
         self.reporter.debug(
             "BROWSER_INIT browser=%s session=%s",
             self.browser_name,
@@ -174,30 +187,24 @@ class TikTokDownloader:
                 "--no-first-run",
                 "--force-device-scale-factor=1",
             ],
-            ignore_default_args=[
-                "--enable-automation",
-            ],
+            ignore_default_args=["--enable-automation"],
             no_viewport=True,
         )
+        context.add_init_script(JS_WEBDRIVER_BYPASS)
+        return context
 
-        context.add_init_script(
-            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        )
-        return cast(BrowserContext, context)
+    def _launch_browser(self, p: Playwright) -> BrowserContext:
+        if is_termux():
+            return self._launch_termux_browser(p)
 
-    def _build_video_list(
-        self,
-        posts: dict[str, dict[str, Any]],
-    ) -> list[PostItem]:
+        return self._launch_desktop_browser(p)
+
+    def _build_video_list(self, posts: dict[str, dict[str, Any]]) -> list[PostItem]:
         videos: list[PostItem] = []
         for vid_id, data in posts.items():
-            author = data.get("author")
-            author_str = self.target_username
-            if isinstance(author, dict) and "uniqueId" in author:
-                author_str = author["uniqueId"]
-            elif isinstance(author, str) and author.strip():
-                author_str = author
-
+            author_str = _resolve_author_string(
+                data.get("author"), self.target_username
+            )
             create_time = data.get("createTime", 0)
             videos.append(
                 PostItem.create(
@@ -208,7 +215,6 @@ class TikTokDownloader:
                     is_photo=False,
                 )
             )
-
         return videos
 
     def _process_single_video(
@@ -220,20 +226,15 @@ class TikTokDownloader:
     ) -> tuple[int, int, int, list[PostItem]]:
         try:
             dl_url = scraper.fetch_musicaldown_link(video.url)
-            if dl_url == "__IMAGE_POST__":
+            if dl_url == IMAGE_POST_MARKER:
                 if not do_photo:
                     self.reporter.debug("IMG_SKIP %s image post", video.video_id)
                     return 0, 0, 1, []
 
                 photos = scraper.fetch_musicaldown_photos(
-                    video.url,
-                    video.video_id,
-                    video.create_time,
+                    video.url, video.video_id, video.create_time
                 )
-                photos_done = 0
-                for ph in photos:
-                    if dl.download_photo(ph):
-                        photos_done += 1
+                photos_done = sum(1 for ph in photos if dl.download_photo(ph))
                 return 0, photos_done, 0, []
 
             dl.download_and_process_video(video, dl_url)
@@ -251,21 +252,12 @@ class TikTokDownloader:
     ) -> tuple[int, int, list[PostItem]]:
         try:
             photos = scraper.fetch_musicaldown_photos(
-                photo_post.url,
-                photo_post.video_id,
-                photo_post.create_time,
+                photo_post.url, photo_post.video_id, photo_post.create_time
             )
-            if not photos:
+            if not photos or all(ph.output_path.exists() for ph in photos):
                 return 0, 1, []
 
-            all_exist = all(ph.output_path.exists() for ph in photos)
-            if all_exist:
-                return 0, 1, []
-
-            photos_done = 0
-            for ph in photos:
-                if dl.download_photo(ph):
-                    photos_done += 1
+            photos_done = sum(1 for ph in photos if dl.download_photo(ph))
             return photos_done, 0, []
         except Exception as e:
             msg = str(e).split("\n")[0][:120]
@@ -290,7 +282,6 @@ class TikTokDownloader:
             total=total,
             unit="posts",
         )
-
         try:
             for idx, item in enumerate(items, 1):
                 if item.output_path.exists() and not item.is_photo:
@@ -299,7 +290,6 @@ class TikTokDownloader:
                     continue
 
                 self.reporter.debug("PROCESS %d/%d id=%s", idx, total, item.video_id)
-
                 if not item.is_photo:
                     vd, pd, sd, fl = self._process_single_video(
                         item, do_photo=True, scraper=scraper, dl=dl
@@ -320,17 +310,91 @@ class TikTokDownloader:
 
         return videos_done, photos_done, skipped, failed_items
 
-    def _run(
+    def _fetch_profile_posts(
+        self, extractor: ProfileExtractor
+    ) -> dict[str, dict[str, Any]] | None:
+        if self.usejson:
+            return extractor.extract_profile_posts(None)
+
+        with sync_playwright() as p:
+            try:
+                context = self._launch_browser(p)
+            except Exception as e:
+                self.reporter.error("LAUNCH_FAIL %s", str(e).split("\n")[0][:120])
+                self.reporter.error("ENSURE Chrome/Edge is installed and fully closed")
+                return None
+
+            try:
+                return extractor.extract_profile_posts(context)
+            finally:
+                try:
+                    context.close()
+                except Exception:
+                    pass
+
+    def _prepare_work_items(
         self,
+        posts: dict[str, dict[str, Any]],
         do_video: bool,
         do_photo: bool,
-    ) -> int:
-        self.reporter.info(
-            "EXEC_START target=%s mode=%s",
-            self.target_username,
-            self.mode,
-        )
+    ) -> tuple[list[PostItem], int]:
+        items: list[PostItem] = []
+        processed_ids: set[str] = set()
+        skipped = 0
 
+        if do_video:
+            video_posts = {
+                k: v for k, v in posts.items() if v.get("post_type") != "photo"
+            }
+            for v in self._build_video_list(video_posts):
+                dur = video_posts.get(v.video_id, {}).get("duration", 0)
+                max_dur = self.config.max_video_duration
+                if max_dur > 0 and dur > max_dur:
+                    self.reporter.debug(
+                        "DUR_SKIP %s duration=%ds exceeds %ds",
+                        v.video_id,
+                        dur,
+                        max_dur,
+                    )
+                    skipped += 1
+                    processed_ids.add(v.video_id)
+                    continue
+
+                if video_posts.get(v.video_id, {}).get("post_type") == "photo":
+                    self.reporter.debug("IMG_SKIP %s photo post", v.video_id)
+                    skipped += 1
+                    processed_ids.add(v.video_id)
+                    continue
+
+                processed_ids.add(v.video_id)
+                items.append(v)
+
+        if do_photo:
+            photo_posts = {k: v for k, v in posts.items() if k not in processed_ids}
+            for post_id, data in photo_posts.items():
+                if data.get("post_type") == "video":
+                    self.reporter.debug("VID_SKIP %s video post", post_id)
+                    skipped += 1
+                    continue
+
+                author_str = _resolve_author_string(
+                    data.get("author"), self.target_username
+                )
+                pi = PostItem.create(
+                    video_id=post_id,
+                    username=author_str,
+                    create_time=data.get("createTime", 0),
+                    output_dir=self.output_dir,
+                    is_photo=True,
+                )
+                items.append(pi)
+
+        return items, skipped
+
+    def _run(self, do_video: bool, do_photo: bool) -> int:
+        self.reporter.info(
+            "EXEC_START target=%s mode=%s", self.target_username, self.mode
+        )
         if self.date_filter:
             self.reporter.info("DATE_RANGE %s", self.date_filter.describe())
 
@@ -347,95 +411,25 @@ class TikTokDownloader:
         if do_video:
             dl.purge_low_res(self.output_dir)
 
-        posts: dict[str, dict[str, Any]] = {}
-        if self.usejson:
-            posts = extractor.extract_profile_posts(None)
-        else:
-            with sync_playwright() as p:
-                try:
-                    context = self._launch_browser(p)
-                except Exception as e:
-                    self.reporter.error("LAUNCH_FAIL %s", str(e).split("\n")[0][:120])
-                    self.reporter.error(
-                        "ENSURE Chrome/Edge is installed and fully closed"
-                    )
-                    return 1
-
-                try:
-                    posts = extractor.extract_profile_posts(context)
-                finally:
-                    try:
-                        context.close()
-                    except Exception:
-                        pass
+        posts = self._fetch_profile_posts(extractor)
+        if posts is None:
+            return 1
 
         if self.date_filter:
             posts = self._apply_date_filter(posts)
 
-        processed_ids: set[str] = set()
-        videos_done = 0
-        photos_done = 0
-        skipped = 0
-        failed_items: list[PostItem] = []
-        items_to_process: list[PostItem] = []
-
-        if do_video:
-            video_posts = {
-                k: v for k, v in posts.items() if v.get("post_type") != "photo"
-            }
-            for v in self._build_video_list(video_posts):
-                dur = video_posts.get(v.video_id, {}).get("duration", 0)
-                if (
-                    self.config.max_video_duration > 0
-                    and dur > self.config.max_video_duration
-                ):
-                    self.reporter.debug(
-                        "DUR_SKIP %s duration=%ds exceeds %ds",
-                        v.video_id,
-                        dur,
-                        self.config.max_video_duration,
-                    )
-                    skipped += 1
-                    processed_ids.add(v.video_id)
-                    continue
-
-                pt = video_posts.get(v.video_id, {}).get("post_type")
-                if pt == "photo":
-                    self.reporter.debug("IMG_SKIP %s photo post", v.video_id)
-                    skipped += 1
-                    processed_ids.add(v.video_id)
-                    continue
-
-                processed_ids.add(v.video_id)
-                items_to_process.append(v)
-
-        if do_photo:
-            photo_posts = {k: v for k, v in posts.items() if k not in processed_ids}
-            for post_id, data in photo_posts.items():
-                if data.get("post_type") == "video":
-                    self.reporter.debug("VID_SKIP %s video post", post_id)
-                    skipped += 1
-                    continue
-
-                author = data.get("author")
-                author_str = self.target_username
-                if isinstance(author, dict) and "uniqueId" in author:
-                    author_str = author["uniqueId"]
-                elif isinstance(author, str) and author.strip():
-                    author_str = author
-
-                pi = PostItem.create(
-                    video_id=post_id,
-                    username=author_str,
-                    create_time=data.get("createTime", 0),
-                    output_dir=self.output_dir,
-                    is_photo=True,
-                )
-                items_to_process.append(pi)
-
         if self.jsononly:
             self.reporter.info("EXEC_DONE scraped %d posts to JSON cache", len(posts))
             return 0
+
+        items_to_process, init_skipped = self._prepare_work_items(
+            posts, do_video, do_photo
+        )
+
+        videos_done = 0
+        photos_done = 0
+        skipped = init_skipped
+        failed_items: list[PostItem] = []
 
         while True:
             with self.reporter:
@@ -445,13 +439,10 @@ class TikTokDownloader:
                 skipped += sd
                 failed_items = fl
 
-            if not failed_items:
+            if not failed_items or not self.reporter.ask_retry():
                 break
 
-            if self.reporter.ask_retry():
-                items_to_process = failed_items
-            else:
-                break
+            items_to_process = failed_items
 
         self.reporter.info(
             "EXEC_DONE videos=%d photos=%d skipped=%d failed=%d",
@@ -477,7 +468,8 @@ class TikTokDownloader:
     def execute(self) -> int:
         if self.mode == "video":
             return self._run(do_video=True, do_photo=False)
-        elif self.mode == "photo":
+
+        if self.mode == "photo":
             return self._run(do_video=False, do_photo=True)
-        else:
-            return self._run(do_video=True, do_photo=True)
+
+        return self._run(do_video=True, do_photo=True)

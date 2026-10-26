@@ -2,10 +2,22 @@ import calendar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
+from typing import Final
+
+DATE_FORMAT: Final[str] = "%Y-%m-%d"
+TIMESTAMP_FORMAT: Final[str] = "%Y%m%d_%H%M%S"
+START_TIME_COMPONENT: Final[tuple[int, int, int]] = (0, 0, 0)
+END_TIME_COMPONENT: Final[tuple[int, int, int]] = (23, 59, 59)
 
 
-@dataclass
+def timestamp_to_utc(create_time: int) -> datetime:
+    if create_time > 0:
+        return datetime.fromtimestamp(create_time, tz=UTC)
+
+    return datetime.now(UTC)
+
+
+@dataclass(frozen=True)
 class DateFilter:
     start_dt: datetime
     end_dt: datetime
@@ -14,13 +26,13 @@ class DateFilter:
         return self.start_dt <= dt <= self.end_dt
 
     def describe(self) -> str:
-        fmt = "%Y-%m-%d"
         if self.start_dt.date() == self.end_dt.date():
-            return self.start_dt.strftime(fmt)
-        return f"{self.start_dt.strftime(fmt)} to {self.end_dt.strftime(fmt)}"
+            return self.start_dt.strftime(DATE_FORMAT)
+
+        return f"{self.start_dt.strftime(DATE_FORMAT)} to {self.end_dt.strftime(DATE_FORMAT)}"
 
     @staticmethod
-    def _parse_date(date_str: str, is_end: bool = False) -> datetime:
+    def _parse_bound(date_str: str, *, is_end: bool) -> datetime:
         parts = date_str.split("-")
         year = int(parts[0])
         month = int(parts[1]) if len(parts) > 1 else (12 if is_end else 1)
@@ -30,27 +42,26 @@ class DateFilter:
         else:
             day = calendar.monthrange(year, month)[1] if is_end else 1
 
-        if is_end:
-            return datetime(year, month, day, 23, 59, 59, tzinfo=UTC)
-        return datetime(year, month, day, 0, 0, 0, tzinfo=UTC)
+        hour, minute, second = END_TIME_COMPONENT if is_end else START_TIME_COMPONENT
+        return datetime(year, month, day, hour, minute, second, tzinfo=UTC)
 
     @classmethod
-    def build(cls, date_input: str | None) -> Optional["DateFilter"]:
+    def build(cls, date_input: str | None) -> "DateFilter | None":
         if not date_input:
             return None
 
         try:
             if ":" in date_input:
                 start_str, end_str = date_input.split(":", 1)
-                start_dt = cls._parse_date(start_str, is_end=False)
-                end_dt = cls._parse_date(end_str, is_end=True)
+                start_dt = cls._parse_bound(start_str, is_end=False)
+                end_dt = cls._parse_bound(end_str, is_end=True)
             else:
-                start_dt = cls._parse_date(date_input, is_end=False)
-                end_dt = cls._parse_date(date_input, is_end=True)
+                start_dt = cls._parse_bound(date_input, is_end=False)
+                end_dt = cls._parse_bound(date_input, is_end=True)
 
             return cls(start_dt=start_dt, end_dt=end_dt)
-        except (ValueError, IndexError):
-            raise ValueError(f"Invalid date format: {date_input}")
+        except (ValueError, IndexError) as err:
+            raise ValueError(f"Invalid date format: {date_input}") from err
 
 
 @dataclass
@@ -72,18 +83,15 @@ class PostItem:
         output_dir: Path,
         is_photo: bool = False,
     ) -> "PostItem":
-        dt_obj = (
-            datetime.fromtimestamp(create_time, tz=UTC)
-            if create_time > 0
-            else datetime.now(UTC)
-        )
-        ts_str = dt_obj.strftime("%Y%m%d_%H%M%S")
+        dt_obj = timestamp_to_utc(create_time)
+        ts_str = dt_obj.strftime(TIMESTAMP_FORMAT)
         url = f"https://www.tiktok.com/@{username}/video/{video_id}"
 
-        if is_photo:
-            filename = f"IMG_{ts_str}_{video_id}_carousel"
-        else:
-            filename = f"VID_{ts_str}_{video_id}.mp4"
+        filename = (
+            f"IMG_{ts_str}_{video_id}_carousel"
+            if is_photo
+            else f"VID_{ts_str}_{video_id}.mp4"
+        )
 
         return cls(
             video_id=video_id,
@@ -117,12 +125,8 @@ class PhotoMetadata:
         create_time: int,
         output_dir: Path,
     ) -> "PhotoMetadata":
-        dt_obj = (
-            datetime.fromtimestamp(create_time, tz=UTC)
-            if create_time > 0
-            else datetime.now(UTC)
-        )
-        ts_str = dt_obj.strftime("%Y%m%d_%H%M%S")
+        dt_obj = timestamp_to_utc(create_time)
+        ts_str = dt_obj.strftime(TIMESTAMP_FORMAT)
         filename = f"IMG_{ts_str}_{post_id}_s{slide_index}.jpg"
 
         return cls(

@@ -2,7 +2,9 @@ import logging
 import subprocess
 import time
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Final
+
+from playwright.sync_api import BrowserContext, Page, Playwright
 
 from ttdl.browser import detect_browser
 from ttdl.config import AppConfig
@@ -10,6 +12,13 @@ from ttdl.events import Reporter
 from ttdl.termux import is_termux
 
 log = logging.getLogger(__name__)
+
+TIKTOK_LOGIN_URL: Final[str] = "https://www.tiktok.com/login"
+SESSION_COOKIE_NAMES: Final[tuple[str, ...]] = ("sessionid_ss", "sessionid")
+ONE_YEAR_SECONDS: Final[int] = 31536000
+AUTH_TIMEOUT_SECONDS: Final[int] = 300
+AUTH_POLL_INTERVAL_SECONDS: Final[float] = 1.5
+CDP_URL: Final[str] = "http://localhost:9222"
 
 
 def export_netscape_cookies(cookies: Sequence[Any]) -> str:
@@ -26,7 +35,7 @@ def export_netscape_cookies(cookies: Sequence[Any]) -> str:
         secure = "TRUE" if c.get("secure", False) else "FALSE"
         expires = int(c.get("expires", 0))
         if expires <= 0:
-            expires = int(time.time()) + 31536000
+            expires = int(time.time()) + ONE_YEAR_SECONDS
         name = str(c.get("name", ""))
         value = str(c.get("value", ""))
         lines.append(
@@ -36,10 +45,98 @@ def export_netscape_cookies(cookies: Sequence[Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _has_session_cookie(cookies: Sequence[Any]) -> bool:
+    for c in cookies:
+        if isinstance(c, dict):
+            c_name = str(c.get("name", ""))
+            c_val = str(c.get("value", ""))
+        else:
+            c_name = str(getattr(c, "name", ""))
+            c_val = str(getattr(c, "value", ""))
+
+        if c_name in SESSION_COOKIE_NAMES and c_val:
+            return True
+
+    return False
+
+
 class AuthManager:
     def __init__(self, config: AppConfig, reporter: Reporter) -> None:
         self.config = config
         self.reporter = reporter
+
+    def _init_termux_context(self, p: Playwright) -> tuple[BrowserContext, Page]:
+        self.reporter.debug("BROWSER_INIT mode=termux_cdp")
+        subprocess.run(
+            [
+                "adb",
+                "forward",
+                "tcp:9222",
+                "localabstract:chrome_devtools_remote",
+            ],
+            capture_output=True,
+            check=False,
+        )
+        subprocess.run(
+            [
+                "adb",
+                "shell",
+                "am",
+                "start",
+                "-n",
+                "com.android.chrome/com.google.android.apps.chrome.Main",
+                "-d",
+                "about:blank",
+            ],
+            capture_output=True,
+            check=False,
+        )
+        time.sleep(3)
+        browser = p.chromium.connect_over_cdp(CDP_URL)
+        context = browser.contexts[0]
+        page = context.pages[0] if context.pages else context.new_page()
+        return context, page
+
+    def _init_desktop_context(self, p: Playwright) -> tuple[BrowserContext, Page]:
+        browser_name, default_path = detect_browser()
+        browser_path = self.config.browser_executable or default_path
+        session_dir = self.config.session_dir / browser_name
+        session_dir.mkdir(parents=True, exist_ok=True)
+
+        self.reporter.debug(
+            "BROWSER_INIT browser=%s session=%s",
+            browser_name,
+            session_dir.name,
+        )
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=str(session_dir),
+            executable_path=browser_path,
+            headless=False,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--start-maximized",
+                "--no-first-run",
+            ],
+            ignore_default_args=["--enable-automation"],
+            no_viewport=True,
+        )
+        page = context.pages[0] if context.pages else context.new_page()
+        return context, page
+
+    def _wait_for_login(self, context: BrowserContext, page: Page) -> bool:
+        start_time = time.time()
+
+        while time.time() - start_time < AUTH_TIMEOUT_SECONDS:
+            time.sleep(AUTH_POLL_INTERVAL_SECONDS)
+            try:
+                if page.is_closed():
+                    break
+                if _has_session_cookie(context.cookies()):
+                    return True
+            except Exception:
+                break
+
+        return False
 
     def login(self) -> int:
         try:
@@ -56,73 +153,15 @@ class AuthManager:
             setup_termux(self.reporter)
 
         self.reporter.info("AUTH_START target=tiktok_login")
-
         with sync_playwright() as p:
-            context = None
+            context: BrowserContext | None = None
             try:
                 if is_termux():
-                    self.reporter.debug("BROWSER_INIT mode=termux_cdp")
-                    subprocess.run(
-                        [
-                            "adb",
-                            "forward",
-                            "tcp:9222",
-                            "localabstract:chrome_devtools_remote",
-                        ],
-                        capture_output=True,
-                        check=False,
-                    )
-                    subprocess.run(
-                        [
-                            "adb",
-                            "shell",
-                            "am",
-                            "start",
-                            "-n",
-                            "com.android.chrome/com.google.android.apps.chrome.Main",
-                            "-d",
-                            "about:blank",
-                        ],
-                        capture_output=True,
-                        check=False,
-                    )
-
-                    time.sleep(3)
-
-                    try:
-                        browser = p.chromium.connect_over_cdp("http://localhost:9222")
-                    except Exception as e:
-                        self.reporter.error("CDP_FAIL %s", str(e))
-                        return 1
-
-                    context = browser.contexts[0]
-                    page = context.pages[0] if context.pages else context.new_page()
+                    context, page = self._init_termux_context(p)
                 else:
-                    browser_name, default_path = detect_browser()
-                    browser_path = self.config.browser_executable or default_path
-                    session_dir = self.config.session_dir / browser_name
-                    session_dir.mkdir(parents=True, exist_ok=True)
+                    context, page = self._init_desktop_context(p)
 
-                    self.reporter.debug(
-                        "BROWSER_INIT browser=%s session=%s",
-                        browser_name,
-                        session_dir.name,
-                    )
-                    context = p.chromium.launch_persistent_context(
-                        user_data_dir=str(session_dir),
-                        executable_path=browser_path,
-                        headless=False,
-                        args=[
-                            "--disable-blink-features=AutomationControlled",
-                            "--start-maximized",
-                            "--no-first-run",
-                        ],
-                        ignore_default_args=["--enable-automation"],
-                        no_viewport=True,
-                    )
-                    page = context.pages[0] if context.pages else context.new_page()
-
-                page.goto("https://www.tiktok.com/login", wait_until="domcontentloaded")
+                page.goto(TIKTOK_LOGIN_URL, wait_until="domcontentloaded")
                 self.reporter.info(
                     "AUTH_WAIT Please log in to your TikTok account in the browser"
                 )
@@ -133,29 +172,7 @@ class AuthManager:
                     "AUTH_POLL Waiting for authentication... Press Ctrl+C to cancel"
                 )
 
-                timeout_seconds = 300
-                start_time = time.time()
-                authenticated = False
-
-                while time.time() - start_time < timeout_seconds:
-                    time.sleep(1.5)
-                    try:
-                        if page.is_closed():
-                            break
-
-                        cookies = context.cookies()
-                        for c in cookies:
-                            c_name = c.get("name", "")
-                            c_val = c.get("value", "")
-                            if c_name in ("sessionid_ss", "sessionid") and c_val:
-                                authenticated = True
-                                break
-
-                        if authenticated:
-                            break
-                    except Exception:
-                        break
-
+                authenticated = self._wait_for_login(context, page)
                 self.reporter.clear_status()
                 if not authenticated:
                     self.reporter.error(
@@ -163,7 +180,6 @@ class AuthManager:
                     )
                     return 1
 
-                # Export and save cookies
                 cookies = context.cookies()
                 cookie_content = export_netscape_cookies(cookies)
 
