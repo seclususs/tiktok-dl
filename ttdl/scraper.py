@@ -205,7 +205,7 @@ class MusicalDownScraper:
             slide_dt = base_dt + timedelta(seconds=idx)
             slide_ts = int(slide_dt.timestamp())
             ts_str = slide_dt.strftime("%Y%m%d_%H%M%S")
-            filename = f"IMG_{ts_str}_{post_id}_s{idx + 1}.jpg"
+            filename = f"IMG_{ts_str}_s{idx + 1}.jpg"
             photos.append(
                 PhotoMetadata(
                     post_id=post_id,

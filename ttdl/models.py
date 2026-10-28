@@ -87,11 +87,7 @@ class PostItem:
         ts_str = dt_obj.strftime(TIMESTAMP_FORMAT)
         url = f"https://www.tiktok.com/@{username}/video/{video_id}"
 
-        filename = (
-            f"IMG_{ts_str}_{video_id}_carousel"
-            if is_photo
-            else f"VID_{ts_str}_{video_id}.mp4"
-        )
+        filename = f"IMG_{ts_str}_carousel" if is_photo else f"VID_{ts_str}.mp4"
 
         return cls(
             video_id=video_id,
@@ -127,7 +123,7 @@ class PhotoMetadata:
     ) -> "PhotoMetadata":
         dt_obj = timestamp_to_utc(create_time)
         ts_str = dt_obj.strftime(TIMESTAMP_FORMAT)
-        filename = f"IMG_{ts_str}_{post_id}_s{slide_index}.jpg"
+        filename = f"IMG_{ts_str}_s{slide_index}.jpg"
 
         return cls(
             post_id=post_id,
