@@ -1,4 +1,5 @@
 import os
+from collections.abc import Sequence
 from typing import Any, Final
 
 SNOWFLAKE_TIMESTAMP_SHIFT: Final[int] = 32
@@ -7,12 +8,31 @@ ID_KEYS: Final[tuple[str, ...]] = ("id", "item_id", "video_id")
 TIMESTAMP_KEYS: Final[tuple[str, ...]] = ("createTime", "create_time")
 
 
-def parse_url_input(target: str) -> list[str]:
-    if not os.path.isfile(target):
-        return [target]
+def parse_url_input(target: str | Sequence[str]) -> list[str]:
+    if not isinstance(target, str):
+        urls: list[str] = []
+        for item in target:
+            urls.extend(parse_url_input(item))
+        return urls
 
-    with open(target, encoding="utf-8") as f:
-        return [line.strip() for line in f if line.strip() and not line.startswith("#")]
+    trimmed = target.strip()
+    if not trimmed:
+        return []
+
+    if os.path.isfile(trimmed):
+        with open(trimmed, encoding="utf-8") as f:
+            lines = [
+                line.strip().strip("'\"")
+                for line in f
+                if line.strip() and not line.strip().startswith("#")
+            ]
+            parsed: list[str] = []
+            for line in lines:
+                parsed.extend(parse_url_input(line))
+            return parsed
+
+    parts = trimmed.split()
+    return [p.strip("'\"") for p in parts if p.strip("'\"")]
 
 
 def _extract_node_id(node: dict[str, Any]) -> str:

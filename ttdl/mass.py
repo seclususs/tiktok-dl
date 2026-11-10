@@ -1,4 +1,3 @@
-import logging
 import subprocess
 import time
 from datetime import UTC, datetime
@@ -14,8 +13,6 @@ from ttdl.extractor import ProfileExtractor
 from ttdl.models import DateFilter, PostItem
 from ttdl.scraper import IMAGE_POST_MARKER, MusicalDownScraper
 from ttdl.termux import is_termux
-
-log = logging.getLogger(__name__)
 
 EDGE_USER_AGENT: Final[str] = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -51,7 +48,7 @@ class TikTokDownloader:
         self,
         config: AppConfig,
         target_username: str,
-        reporter: "Reporter",
+        reporter: Reporter,
         mode: str = "all",
         date_filter: DateFilter | None = None,
         jsononly: bool = False,
@@ -95,16 +92,13 @@ class TikTokDownloader:
             if self.date_filter.matches(dt):
                 filtered[k] = v
 
-        self.reporter.info(
-            "DATE_FILTER %d->%d posts in range", len(posts), len(filtered)
-        )
+        self.reporter.info("Filtered %d of %d posts", len(filtered), len(posts))
         return filtered
 
     def _browser_user_agent(self) -> str:
         return EDGE_USER_AGENT if self.browser_name == "edge" else CHROME_USER_AGENT
 
     def _launch_termux_browser(self, p: Playwright) -> BrowserContext:
-        self.reporter.debug("BROWSER_INIT mode=termux_cdp")
         subprocess.run(
             [
                 "adb",
@@ -133,7 +127,7 @@ class TikTokDownloader:
         try:
             browser = p.chromium.connect_over_cdp(CDP_ENDPOINT)
         except Exception:
-            self.reporter.error("CDP_FAIL Failed to connect to Android Chrome")
+            self.reporter.error("Failed to connect to Android Chrome")
             raise
 
         context = browser.contexts[0]
@@ -167,13 +161,6 @@ class TikTokDownloader:
         return context
 
     def _launch_desktop_browser(self, p: Playwright) -> BrowserContext:
-        self.reporter.debug(
-            "BROWSER_INIT browser=%s session=%s",
-            self.browser_name,
-            self.session_dir.name,
-        )
-        self.reporter.debug("BROWSER_PATH %s", self.browser_path)
-
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(self.session_dir),
             executable_path=self.browser_path,
@@ -228,7 +215,6 @@ class TikTokDownloader:
             dl_url = scraper.fetch_musicaldown_link(video.url)
             if dl_url == IMAGE_POST_MARKER:
                 if not do_photo:
-                    self.reporter.debug("IMG_SKIP %s image post", video.video_id)
                     return 0, 0, 1, []
 
                 photos = scraper.fetch_musicaldown_photos(
@@ -240,8 +226,8 @@ class TikTokDownloader:
             dl.download_and_process_video(video, dl_url)
             return 1, 0, 0, []
         except Exception as e:
-            msg = str(e).split("\n")[0][:120]
-            self.reporter.error("FAIL %s %s", video.video_id, msg)
+            msg = str(e).split("\n")[0]
+            self.reporter.error("Failed %s: %s", video.video_id, msg)
             return 0, 0, 0, [video]
 
     def _process_single_photo_post(
@@ -260,14 +246,14 @@ class TikTokDownloader:
             photos_done = sum(1 for ph in photos if dl.download_photo(ph))
             return photos_done, 0, []
         except Exception as e:
-            msg = str(e).split("\n")[0][:120]
-            self.reporter.error("FAIL %s %s", photo_post.video_id, msg)
+            msg = str(e).split("\n")[0]
+            self.reporter.error("Failed %s: %s", photo_post.video_id, msg)
             return 0, 0, [photo_post]
 
     def _run_pass(
         self,
         items: list[PostItem],
-        do_video: bool,
+        do_photo: bool,
         scraper: MusicalDownScraper,
         dl: MediaDownloader,
     ) -> tuple[int, int, int, list[PostItem]]:
@@ -277,22 +263,16 @@ class TikTokDownloader:
         failed_items: list[PostItem] = []
 
         total = len(items)
-        overall_task = self.reporter.add_task(
-            "[bold green]Overall",
-            total=total,
-            unit="posts",
-        )
         try:
             for idx, item in enumerate(items, 1):
                 if item.output_path.exists() and not item.is_photo:
                     skipped += 1
-                    self.reporter.update_task(overall_task, advance=1)
                     continue
 
-                self.reporter.debug("PROCESS %d/%d id=%s", idx, total, item.video_id)
+                self.reporter.set_status(f"Downloading {idx}/{total}")
                 if not item.is_photo:
                     vd, pd, sd, fl = self._process_single_video(
-                        item, do_photo=True, scraper=scraper, dl=dl
+                        item, do_photo=do_photo, scraper=scraper, dl=dl
                     )
                     videos_done += vd
                     photos_done += pd
@@ -303,10 +283,8 @@ class TikTokDownloader:
                     photos_done += pd
                     skipped += sd
                     failed_items.extend(fl_p)
-
-                self.reporter.update_task(overall_task, advance=1)
         finally:
-            self.reporter.remove_task(overall_task)
+            self.reporter.clear_status()
 
         return videos_done, photos_done, skipped, failed_items
 
@@ -320,8 +298,8 @@ class TikTokDownloader:
             try:
                 context = self._launch_browser(p)
             except Exception as e:
-                self.reporter.error("LAUNCH_FAIL %s", str(e).split("\n")[0][:120])
-                self.reporter.error("ENSURE Chrome/Edge is installed and fully closed")
+                self.reporter.error("Browser launch failed: %s", str(e).split("\n")[0])
+                self.reporter.warning("Ensure Chrome/Edge is installed")
                 return None
 
             try:
@@ -350,18 +328,11 @@ class TikTokDownloader:
                 dur = video_posts.get(v.video_id, {}).get("duration", 0)
                 max_dur = self.config.max_video_duration
                 if max_dur > 0 and dur > max_dur:
-                    self.reporter.debug(
-                        "DUR_SKIP %s duration=%ds exceeds %ds",
-                        v.video_id,
-                        dur,
-                        max_dur,
-                    )
                     skipped += 1
                     processed_ids.add(v.video_id)
                     continue
 
                 if video_posts.get(v.video_id, {}).get("post_type") == "photo":
-                    self.reporter.debug("IMG_SKIP %s photo post", v.video_id)
                     skipped += 1
                     processed_ids.add(v.video_id)
                     continue
@@ -373,7 +344,6 @@ class TikTokDownloader:
             photo_posts = {k: v for k, v in posts.items() if k not in processed_ids}
             for post_id, data in photo_posts.items():
                 if data.get("post_type") == "video":
-                    self.reporter.debug("VID_SKIP %s video post", post_id)
                     skipped += 1
                     continue
 
@@ -392,11 +362,9 @@ class TikTokDownloader:
         return items, skipped
 
     def _run(self, do_video: bool, do_photo: bool) -> int:
-        self.reporter.info(
-            "EXEC_START target=%s mode=%s", self.target_username, self.mode
-        )
+        self.reporter.info("@%s (%s)", self.target_username, self.mode)
         if self.date_filter:
-            self.reporter.info("DATE_RANGE %s", self.date_filter.describe())
+            self.reporter.info("Range: %s", self.date_filter.describe())
 
         dl = MediaDownloader(self.config, self.reporter)
         scraper = MusicalDownScraper(self.config, self.output_dir, self.reporter)
@@ -419,7 +387,7 @@ class TikTokDownloader:
             posts = self._apply_date_filter(posts)
 
         if self.jsononly:
-            self.reporter.info("EXEC_DONE scraped %d posts to JSON cache", len(posts))
+            self.reporter.success("Saved %d posts to cache", len(posts))
             return 0
 
         items_to_process, init_skipped = self._prepare_work_items(
@@ -433,7 +401,7 @@ class TikTokDownloader:
 
         while True:
             with self.reporter:
-                vd, pd, sd, fl = self._run_pass(items_to_process, do_video, scraper, dl)
+                vd, pd, sd, fl = self._run_pass(items_to_process, do_photo, scraper, dl)
                 videos_done += vd
                 photos_done += pd
                 skipped += sd
@@ -444,13 +412,6 @@ class TikTokDownloader:
 
             items_to_process = failed_items
 
-        self.reporter.info(
-            "EXEC_DONE videos=%d photos=%d skipped=%d failed=%d",
-            videos_done,
-            photos_done,
-            skipped,
-            len(failed_items),
-        )
         self.reporter.print_summary(
             "Download Summary",
             [

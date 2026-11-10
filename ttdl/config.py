@@ -257,7 +257,7 @@ class AppConfig:
         try:
             with open(self.cfg_path, "rb") as f:
                 data = tomllib.load(f)
-        except Exception:
+        except (tomllib.TOMLDecodeError, OSError):
             return
 
         if "scraper" in data:
@@ -331,17 +331,11 @@ class AppConfig:
         return True
 
     def validate_dependencies(self, require_ffmpeg: bool = False) -> None:
-        clean_patterns = (
-            "temp_raw_*.mp4",
-            "temp_proc_*.mp4",
-            "*.download",
-            "*.tmp",
-        )
-        for pattern in clean_patterns:
+        for pattern in TMP_CLEAN_PATTERNS:
             for f in self.tmp_dir.glob(pattern):
                 try:
                     f.unlink(missing_ok=True)
-                except Exception:
+                except OSError:
                     pass
 
         if require_ffmpeg:

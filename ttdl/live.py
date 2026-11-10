@@ -1,6 +1,5 @@
 import http.cookiejar
 import json
-import logging
 import os
 import shutil
 import subprocess
@@ -12,8 +11,6 @@ from typing import Any, Final, cast
 
 from ttdl.config import AppConfig
 from ttdl.events import Reporter
-
-log = logging.getLogger(__name__)
 
 QUALITY_TIERS: Final[dict[str, int]] = {
     "origion": 1000,
@@ -261,7 +258,7 @@ class LiveDownloader:
     def _find_cookies_file(self) -> Path | None:
         if self.cookies_path:
             if not self.cookies_path.is_file():
-                self.reporter.error("FILE_NOT_FOUND cookies=%s", self.cookies_path)
+                self.reporter.error("Cookie file not found: %s", self.cookies_path)
                 return None
             return self.cookies_path
 
@@ -340,7 +337,7 @@ class LiveDownloader:
         if not raw_file.exists() or raw_file.stat().st_size == 0:
             return
 
-        self.reporter.info("FINALIZE Finalizing recording...")
+        self.reporter.info("Finalizing recording")
         remux_cmd = [
             "ffmpeg",
             "-y",
@@ -375,31 +372,26 @@ class LiveDownloader:
             raw_file.replace(final_file)
 
     def execute(self) -> int:
-        self.reporter.info("EXEC_START target=%s mode=live", self.target)
+        self.reporter.info("@%s (live)", self.target)
         live_out_dir = self.config.downloads_dir / "live" / self.target
-        self.reporter.info("OUT %s", live_out_dir)
+        self.reporter.info("Output: %s", live_out_dir)
 
         try:
             is_live, room_id = self._check_live_status()
         except Exception as e:
-            self.reporter.error("STATUS_FAIL %s", str(e))
+            self.reporter.error("Live status check failed: %s", str(e))
             return 1
 
         if not is_live or not room_id:
-            self.reporter.warning(
-                "OFFLINE target=%s is not currently live", self.target
-            )
+            self.reporter.warning("User @%s is offline", self.target)
             return 0
 
-        self.reporter.info("LIVE_FOUND room_id=%s", room_id)
+        self.reporter.info("Room ID: %s", room_id)
         cookie_file = self._find_cookies_file()
         if not cookie_file:
-            self.reporter.error(
-                "AUTH_FAIL cookies not found. Please run 'ttdl login' first to authenticate."
-            )
+            self.reporter.error("Cookies not found. Run 'ttdl login' first")
             return 1
 
-        self.reporter.debug("COOKIE_LOAD %s", cookie_file)
         cookie_header = self._load_cookie_header(cookie_file)
 
         try:
@@ -407,11 +399,11 @@ class LiveDownloader:
                 room_id, cookie_header
             )
         except Exception as e:
-            self.reporter.error("RESOLVE_FAIL %s", str(e))
+            self.reporter.error("Stream resolve failed: %s", str(e))
             return 1
 
         info_label = f"{q_name} {q_details}".strip()
-        self.reporter.info("QUALITY %s", info_label)
+        self.reporter.info("Quality: %s", info_label)
 
         live_out_dir.mkdir(parents=True, exist_ok=True)
         timestamp = int(time.time())
@@ -435,7 +427,7 @@ class LiveDownloader:
             str(raw_file),
         ]
 
-        self.reporter.info("REC_START target=%s file=%s", self.target, out_file.name)
+        self.reporter.info("Recording to %s", out_file.name)
         proc: subprocess.Popen[bytes] | None = None
 
         err_log = self.config.tmp_dir / f"ffmpeg_live_{timestamp}.log"
@@ -476,12 +468,11 @@ class LiveDownloader:
                     except Exception:
                         pass
 
-                self.reporter.error("REC_FAIL FFmpeg recording failed%s", err_detail)
+                self.reporter.error("FFmpeg recording failed%s", err_detail)
                 return 1
 
-            self.reporter.info("STREAM_END file=%s", out_file.name)
+            self.reporter.info("Stream ended")
             self._finalize_recording(raw_file, out_file)
-            self.reporter.info("EXEC_DONE Live stream recording complete")
             self.reporter.print_summary(
                 "Live Stream Complete",
                 [
@@ -503,11 +494,8 @@ class LiveDownloader:
                     proc.wait(timeout=3)
                 except Exception:
                     proc.terminate()
-            self.reporter.info(
-                "REC_INTERRUPT saving recorded stream to %s", out_file.name
-            )
+            self.reporter.info("Saving recording")
             self._finalize_recording(raw_file, out_file)
-            self.reporter.info("EXEC_DONE Live stream recording stopped by user")
             self.reporter.print_summary(
                 "Live Stream Interrupted",
                 [
@@ -523,7 +511,7 @@ class LiveDownloader:
             tracker.stop()
             if raw_file.exists() and not out_file.exists():
                 self._finalize_recording(raw_file, out_file)
-            self.reporter.error("REC_FAIL %s", str(e))
+            self.reporter.error("Recording error: %s", str(e))
             return 1
         finally:
             tracker.stop()

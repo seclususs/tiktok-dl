@@ -1,18 +1,15 @@
 import json
-import logging
 import re
 from datetime import UTC, datetime
 from typing import Any, Final
 
 from bs4 import BeautifulSoup
-from playwright.sync_api import BrowserContext
+from playwright.sync_api import BrowserContext, Page
 
 from ttdl.browser import collect_video_links, count_video_links, is_page_blocked
 from ttdl.config import AppConfig
 from ttdl.events import Reporter
 from ttdl.utils import SNOWFLAKE_TIMESTAMP_SHIFT, extract_video_nodes
-
-log = logging.getLogger(__name__)
 
 API_IGNORE_PATTERNS: Final[tuple[str, ...]] = (
     "/recommend/",
@@ -114,14 +111,13 @@ class ProfileExtractor:
         self,
         target_username: str,
         config: AppConfig,
-        reporter: "Reporter",
+        reporter: Reporter,
         usejson: bool = False,
         force: bool = False,
     ) -> None:
         self.reporter = reporter
         self.target_username = target_username.lstrip("@")
         self.config = config
-        self.workspace_dir = config.workspace_dir
         self.logs_dir = config.logs_dir
         self.usejson = usejson
         self.force = force
@@ -170,21 +166,17 @@ class ProfileExtractor:
                 else:
                     videos_dict[vid_id] = record
                     added_count += 1
-
-            self.reporter.debug(
-                "API_INTERCEPT +%d total=%d", len(items), len(videos_dict)
-            )
         except Exception:
             pass
 
     def _wait_for_manual_intervention(
         self,
-        page: Any,
+        page: Page,
         success_msg: str,
         allow_empty: bool = False,
         dict_ref: dict[str, dict[str, Any]] | None = None,
     ) -> None:
-        self.reporter.warning("WAIT max 5 min for manual intervention")
+        self.reporter.warning("Waiting for manual login/captcha (max 5m)")
         interval_s = self.config.manual_wait_interval_ms // 1000
 
         for wr in range(self.config.manual_wait_rounds):
@@ -192,21 +184,20 @@ class ProfileExtractor:
             has_links = count_video_links(page) > 0
             has_dict = allow_empty and bool(dict_ref)
             if has_links or has_dict:
-                self.reporter.info(success_msg)
+                self.reporter.success(success_msg)
                 break
 
             if (wr + 1) % 6 == 0:
                 elapsed_s = (wr + 1) * interval_s
                 total_s = self.config.manual_wait_rounds * interval_s
-                self.reporter.info("WAIT %ds/%ds", elapsed_s, total_s)
+                self.reporter.info("Waiting: %ds / %ds", elapsed_s, total_s)
 
     def _scroll_and_collect(
         self,
-        page: Any,
+        page: Page,
         videos_dict: dict[str, dict[str, Any]],
         cached_ids: set[str],
     ) -> None:
-        self.reporter.debug("SCROLL_START collecting video grid")
         stale = 0
         round_num = 0
 
@@ -254,25 +245,13 @@ class ProfileExtractor:
                         consecutive_known = 0
 
                 if smart_stop:
-                    self.reporter.debug("SCROLL_STOP consecutive known videos detected")
                     break
 
                 delta = len(videos_dict) - prev
-                self.reporter.debug(
-                    "SCROLL round=%d new=%d total=%d",
-                    round_num,
-                    delta,
-                    len(videos_dict),
-                )
 
                 if delta == 0:
                     stale += 1
                     if stale >= self.config.max_stale_scrolls:
-                        self.reporter.debug(
-                            "SCROLL_DONE %d stale rounds total=%d",
-                            self.config.max_stale_scrolls,
-                            len(videos_dict),
-                        )
                         break
                 else:
                     stale = 0
@@ -287,7 +266,7 @@ class ProfileExtractor:
         soup = BeautifulSoup(html_content, "html.parser")
 
         if not videos_dict:
-            self.reporter.info("FALLBACK static HTML parse")
+            self.reporter.info("Parsing static HTML")
 
             for a_tag in soup.find_all("a", href=True):
                 match = HTML_ITEM_REGEX.search(str(a_tag["href"] or ""))
@@ -333,8 +312,7 @@ class ProfileExtractor:
                 except Exception:
                     pass
 
-    def _navigate_profile(self, page: Any, profile_url: str) -> None:
-        self.reporter.debug("NAV %s", profile_url)
+    def _navigate_profile(self, page: Page, profile_url: str) -> None:
         try:
             page.goto(
                 profile_url,
@@ -342,21 +320,17 @@ class ProfileExtractor:
                 timeout=GOTO_TIMEOUT_MS,
             )
         except Exception as e:
-            self.reporter.warning("NAV_WARN %s", str(e).split("\n")[0][:120])
+            self.reporter.warning("Navigation warning: %s", str(e).split("\n")[0])
         page.wait_for_timeout(3000)
 
         if is_page_blocked(page):
-            self.reporter.warning("BLOCKED 403/captcha detected")
-            self.reporter.warning(
-                "ACTION navigate to %s in your browser manually", profile_url
-            )
-            self.reporter.warning("ACTION complete captcha/login ensure videos visible")
+            self.reporter.warning("Captcha or login challenge detected")
+            self.reporter.warning("Please solve captcha in browser")
             self._wait_for_manual_intervention(
                 page,
-                "[green]UNBLOCKED videos detected after intervention",
+                "Page unlocked, resuming",
             )
 
-        self.reporter.debug("WAIT_SHELL user profile elements")
         try:
             page.wait_for_selector(
                 SELECTOR_USER_SHELL,
@@ -364,24 +338,22 @@ class ProfileExtractor:
                 timeout=SELECTOR_TIMEOUT_MS,
             )
         except Exception:
-            self.reporter.debug("SHELL_TIMEOUT proceeding")
+            pass
 
         try:
             tab = page.locator(SELECTOR_VIDEOS_TAB)
             if tab.count() > 0:
                 tab.first.click(force=True)
-                self.reporter.debug("TAB_CLICKED videos")
                 page.wait_for_timeout(3000)
         except Exception:
             pass
 
     def _ensure_items_visible(
         self,
-        page: Any,
+        page: Page,
         profile_url: str,
         videos_dict: dict[str, dict[str, Any]],
     ) -> None:
-        self.reporter.debug("WAIT_ITEMS video links in DOM")
         if count_video_links(page) == 0:
             try:
                 page.wait_for_selector(
@@ -390,18 +362,18 @@ class ProfileExtractor:
                     timeout=SELECTOR_TIMEOUT_MS,
                 )
             except Exception:
-                self.reporter.warning("ITEMS_TIMEOUT no video links after 30s")
+                self.reporter.warning("No video links found after 30s")
                 page.evaluate("window.scrollTo(0, 500)")
                 page.wait_for_timeout(3000)
                 page.evaluate("window.scrollTo(0, 0)")
                 page.wait_for_timeout(3000)
 
         if count_video_links(page) == 0 and not videos_dict:
-            self.reporter.warning("EMPTY_GRID likely requires TikTok login")
-            self.reporter.warning("ACTION login in your browser open %s", profile_url)
+            self.reporter.warning("Empty grid: login may be required")
+            self.reporter.warning("Please open %s in browser", profile_url)
             self._wait_for_manual_intervention(
                 page,
-                "[green]RESOLVED videos detected",
+                "Videos detected, resuming",
                 allow_empty=True,
                 dict_ref=videos_dict,
             )
@@ -410,7 +382,7 @@ class ProfileExtractor:
         self,
         context: BrowserContext | None,
     ) -> dict[str, dict[str, Any]]:
-        self.reporter.info("EXTRACT_INIT target=%s", self.target_username)
+        self.reporter.set_status(f"Fetching @{self.target_username}")
         videos_dict: dict[str, dict[str, Any]] = {}
         cached_ids: set[str] = set()
 
@@ -419,9 +391,11 @@ class ProfileExtractor:
                 with open(self.json_path, encoding="utf-8") as f:
                     videos_dict = json.load(f)
                 cached_ids = set(videos_dict.keys())
-                self.reporter.info("CACHE_LOAD found %d posts", len(videos_dict))
+                self.reporter.clear_status()
+                self.reporter.info("Loaded %d posts from cache", len(videos_dict))
             except Exception as e:
-                self.reporter.error("CACHE_FAIL %s", str(e))
+                self.reporter.clear_status()
+                self.reporter.error("Cache load failed: %s", str(e))
                 videos_dict = {}
 
         if self.usejson:
@@ -443,22 +417,23 @@ class ProfileExtractor:
             self._scroll_and_collect(page, videos_dict, cached_ids)
             html_content = page.content()
         except Exception as e:
-            self.reporter.error("BROWSER_FAIL %s", str(e).split("\n")[0][:120])
+            self.reporter.error("Browser error: %s", str(e).split("\n")[0])
             raise RuntimeError(f"Browser extraction failed: {e}") from e
 
         self._enrich_from_html(html_content, videos_dict)
         if not videos_dict:
             dump = self.logs_dir / f"error_dump_{self.target_username}.html"
             dump.write_text(html_content, encoding="utf-8")
-            self.reporter.error("ZERO_POSTS profile empty or blocked")
-            self.reporter.error("DUMP %s", dump)
+            self.reporter.error("Profile empty or blocked")
+            self.reporter.error("Dump saved to %s", dump.name)
             raise RuntimeError("Profile empty or blocked")
 
         try:
             with open(self.json_path, "w", encoding="utf-8") as f:
                 json.dump(videos_dict, f, indent=4)
         except Exception as e:
-            self.reporter.error("CACHE_SAVE_FAIL %s", str(e))
+            self.reporter.error("Cache save failed: %s", str(e))
 
-        self.reporter.info("EXTRACT_DONE found=%d", len(videos_dict))
+        self.reporter.clear_status()
+        self.reporter.success("Found %d posts", len(videos_dict))
         return videos_dict

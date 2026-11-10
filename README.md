@@ -34,58 +34,61 @@ pip install -e .
 Download everything from a profile:
 
 ```bash
-ttdl batch username
+ttdl @username
 ```
 
 Videos only:
 
 ```bash
-ttdl video username
+ttdl @username --video
 ```
 
 Photos only:
 
 ```bash
-ttdl photo username
+ttdl @username --photo
 ```
 
 Filter by date:
 
 ```bash
-ttdl batch username --date 2023
-ttdl batch username --date 2023-10
-ttdl batch username --date 2023-12-25
-ttdl batch username --date 2021:2023
-ttdl batch username --date 2023-01:2023-06
-ttdl batch username --date 2024-12-22:2025-01-01
-ttdl batch username --date 2023-03-15:2024
+ttdl @username --date 2023
+ttdl @username --date 2023-10
+ttdl @username --date 2023-12-25
+ttdl @username --date 2021:2023
+ttdl @username --date 2023-01:2023-06
+ttdl @username --date 2024-12-22:2025-01-01
+ttdl @username --date 2023-03-15:2024
 ```
 
-The `--date` filter can be combined with `batch`, `video`, or `photo`.
+The `--date` filter can be combined with `--video` or `--photo`.
 
 Scrape and save JSON cache only (no media download):
 
 ```bash
-ttdl batch username --scrape
+ttdl @username --scrape
+ttdl @username --video --scrape
 ```
 
 Download directly from existing JSON cache (skip browser scraping):
 
 ```bash
-ttdl batch username --cached
+ttdl @username --cache
+ttdl @username --video --cache
 ```
 
 Force full profile scrape:
 
 ```bash
-ttdl batch username --force
+ttdl @username --force
 ```
 
-Download a single direct link or a text file of URLs:
+Download direct links or a text file of URLs:
 
 ```bash
-ttdl url "https://www.tiktok.com/@username/video/123456789"
-ttdl url urls.txt
+ttdl "https://www.tiktok.com/@username/video/123456789"
+ttdl "https://tiktok.com/1 https://tiktok.com/2"
+ttdl urls.txt
 ```
 
 Output lands in the standard Downloads folder:
@@ -97,7 +100,7 @@ Output lands in the standard Downloads folder:
 Download Live Stream:
 
 ```bash
-ttdl live username
+ttdl @username --live
 ```
 
 Output lands in the standard Downloads folder:

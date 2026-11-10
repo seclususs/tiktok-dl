@@ -2,7 +2,7 @@ import calendar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final
+from typing import Final, Self
 
 DATE_FORMAT: Final[str] = "%Y-%m-%d"
 TIMESTAMP_FORMAT: Final[str] = "%Y%m%d_%H%M%S"
@@ -46,7 +46,7 @@ class DateFilter:
         return datetime(year, month, day, hour, minute, second, tzinfo=UTC)
 
     @classmethod
-    def build(cls, date_input: str | None) -> "DateFilter | None":
+    def build(cls, date_input: str | None) -> Self | None:
         if not date_input:
             return None
 
@@ -82,7 +82,7 @@ class PostItem:
         create_time: int,
         output_dir: Path,
         is_photo: bool = False,
-    ) -> "PostItem":
+    ) -> Self:
         dt_obj = timestamp_to_utc(create_time)
         ts_str = dt_obj.strftime(TIMESTAMP_FORMAT)
         url = f"https://www.tiktok.com/@{username}/video/{video_id}"
@@ -120,7 +120,7 @@ class PhotoMetadata:
         download_url: str,
         create_time: int,
         output_dir: Path,
-    ) -> "PhotoMetadata":
+    ) -> Self:
         dt_obj = timestamp_to_utc(create_time)
         ts_str = dt_obj.strftime(TIMESTAMP_FORMAT)
         filename = f"IMG_{ts_str}_s{slide_index}.jpg"

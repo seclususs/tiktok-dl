@@ -1,4 +1,3 @@
-import logging
 import subprocess
 import time
 from collections.abc import Sequence
@@ -10,8 +9,6 @@ from ttdl.browser import detect_browser
 from ttdl.config import AppConfig
 from ttdl.events import Reporter
 from ttdl.termux import is_termux
-
-log = logging.getLogger(__name__)
 
 TIKTOK_LOGIN_URL: Final[str] = "https://www.tiktok.com/login"
 SESSION_COOKIE_NAMES: Final[tuple[str, ...]] = ("sessionid_ss", "sessionid")
@@ -66,7 +63,6 @@ class AuthManager:
         self.reporter = reporter
 
     def _init_termux_context(self, p: Playwright) -> tuple[BrowserContext, Page]:
-        self.reporter.debug("BROWSER_INIT mode=termux_cdp")
         subprocess.run(
             [
                 "adb",
@@ -103,11 +99,6 @@ class AuthManager:
         session_dir = self.config.session_dir / browser_name
         session_dir.mkdir(parents=True, exist_ok=True)
 
-        self.reporter.debug(
-            "BROWSER_INIT browser=%s session=%s",
-            browser_name,
-            session_dir.name,
-        )
         context = p.chromium.launch_persistent_context(
             user_data_dir=str(session_dir),
             executable_path=browser_path,
@@ -142,9 +133,7 @@ class AuthManager:
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
-            self.reporter.error(
-                "Playwright is not installed. Please install dependencies."
-            )
+            self.reporter.error("Playwright is not installed. Run: pip install .")
             return 1
 
         if is_termux():
@@ -152,7 +141,7 @@ class AuthManager:
 
             setup_termux(self.reporter)
 
-        self.reporter.info("AUTH_START target=tiktok_login")
+        self.reporter.info("Starting login session")
         with sync_playwright() as p:
             context: BrowserContext | None = None
             try:
@@ -162,22 +151,13 @@ class AuthManager:
                     context, page = self._init_desktop_context(p)
 
                 page.goto(TIKTOK_LOGIN_URL, wait_until="domcontentloaded")
-                self.reporter.info(
-                    "AUTH_WAIT Please log in to your TikTok account in the browser"
-                )
-                self.reporter.set_status(
-                    "Waiting for browser login... (Press Ctrl+C to cancel)"
-                )
-                self.reporter.debug(
-                    "AUTH_POLL Waiting for authentication... Press Ctrl+C to cancel"
-                )
+                self.reporter.info("Please log in to TikTok in browser")
+                self.reporter.set_status("Waiting for login (Ctrl+C to cancel)")
 
                 authenticated = self._wait_for_login(context, page)
                 self.reporter.clear_status()
                 if not authenticated:
-                    self.reporter.error(
-                        "AUTH_TIMEOUT Login was not completed or timed out"
-                    )
+                    self.reporter.error("Login timed out")
                     return 1
 
                 cookies = context.cookies()
@@ -187,16 +167,16 @@ class AuthManager:
                 out_path = self.config.config_dir / "cookies.txt"
                 out_path.write_text(cookie_content, encoding="utf-8")
 
-                self.reporter.success("AUTH_SUCCESS Cookies saved to %s", out_path)
+                self.reporter.success("Saved session cookies")
                 return 0
 
             except KeyboardInterrupt:
                 self.reporter.clear_status()
-                self.reporter.warning("AUTH_CANCEL Login cancelled by user")
+                self.reporter.warning("Login cancelled")
                 return 1
             except Exception as e:
                 self.reporter.clear_status()
-                self.reporter.error("AUTH_FAIL %s", str(e))
+                self.reporter.error("Login failed: %s", str(e))
                 return 1
             finally:
                 if context:

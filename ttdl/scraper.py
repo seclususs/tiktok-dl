@@ -1,4 +1,3 @@
-import logging
 import re
 import time
 from datetime import UTC, datetime, timedelta
@@ -12,8 +11,6 @@ from bs4 import BeautifulSoup, Tag
 from ttdl.config import AppConfig
 from ttdl.events import Reporter
 from ttdl.models import PhotoMetadata
-
-log = logging.getLogger(__name__)
 
 BASE_URL: Final[str] = "https://musicaldown.com"
 HOMEPAGE_URL: Final[str] = f"{BASE_URL}/en"
@@ -97,9 +94,7 @@ def _extract_photo_urls(html_content: str) -> list[str]:
 
 
 class MusicalDownScraper:
-    def __init__(
-        self, config: AppConfig, output_dir: Path, reporter: "Reporter"
-    ) -> None:
+    def __init__(self, config: AppConfig, output_dir: Path, reporter: Reporter) -> None:
         self.reporter = reporter
         self.config = config
         self.logs_dir = config.logs_dir
@@ -109,52 +104,45 @@ class MusicalDownScraper:
 
     def _musicaldown_submit(self, post_url: str) -> str | None:
         if post_url == self._last_url and self._last_html:
-            self.reporter.debug("MUSICALDOWN using cached HTML for %s", post_url)
             return self._last_html
 
-        session = requests.Session()
-        session.headers.update({"User-Agent": DEFAULT_UA})
-
         max_retries = self.config.musicaldown_max_retries
-        for attempt in range(1, max_retries + 1):
-            self.reporter.debug(
-                "MUSICALDOWN attempt=%d/%d url=%s", attempt, max_retries, post_url
-            )
-            html_content = ""
 
-            try:
-                resp_home = session.get(HOMEPAGE_URL, timeout=REQUEST_TIMEOUT)
-                resp_home.raise_for_status()
+        with requests.Session() as session:
+            session.headers.update({"User-Agent": DEFAULT_UA})
 
-                soup = BeautifulSoup(resp_home.text, "html.parser")
-                action_url, form_data = _parse_musicaldown_form(soup, post_url)
+            for attempt in range(1, max_retries + 1):
+                html_content = ""
 
-                self.reporter.debug("MUSICALDOWN_SUBMIT")
-                session.headers.update({"Referer": HOMEPAGE_URL})
-                r_post = session.post(
-                    action_url, data=form_data, timeout=REQUEST_TIMEOUT
-                )
-                r_post.raise_for_status()
+                try:
+                    resp_home = session.get(HOMEPAGE_URL, timeout=REQUEST_TIMEOUT)
+                    resp_home.raise_for_status()
 
-                html_content = r_post.text
-                _check_toast_error(html_content)
+                    soup = BeautifulSoup(resp_home.text, "html.parser")
+                    action_url, form_data = _parse_musicaldown_form(soup, post_url)
 
-                self._last_url = post_url
-                self._last_html = html_content
-                return str(html_content)
-            except Exception as e:
-                msg = str(e).split("\n")[0][:120]
-                self.reporter.warning(
-                    "MUSICALDOWN_FAIL attempt=%d err=%s", attempt, msg
-                )
+                    session.headers.update({"Referer": HOMEPAGE_URL})
+                    r_post = session.post(
+                        action_url, data=form_data, timeout=REQUEST_TIMEOUT
+                    )
+                    r_post.raise_for_status()
 
-                if attempt == max_retries:
-                    dump = self.logs_dir / f"error_md_{attempt}.html"
-                    dump.write_text(html_content, encoding="utf-8")
-                    self.reporter.debug("DUMP %s", dump.name)
-                    raise ValueError("MUSICALDOWN_MAX_RETRIES_EXHAUSTED") from e
+                    html_content = r_post.text
+                    _check_toast_error(html_content)
 
-                time.sleep(RETRY_SLEEP_SECONDS)
+                    self._last_url = post_url
+                    self._last_html = html_content
+                    return str(html_content)
+                except Exception as e:
+                    msg = str(e).split("\n")[0]
+                    self.reporter.warning("Scrape retry %d: %s", attempt, msg)
+
+                    if attempt == max_retries:
+                        dump = self.logs_dir / f"error_md_{attempt}.html"
+                        dump.write_text(html_content, encoding="utf-8")
+                        raise ValueError("MUSICALDOWN_MAX_RETRIES_EXHAUSTED") from e
+
+                    time.sleep(RETRY_SLEEP_SECONDS)
 
         raise ValueError("MUSICALDOWN_UNREACHABLE")
 
@@ -172,10 +160,8 @@ class MusicalDownScraper:
 
         for href, text in valid_links:
             if "HD" in text:
-                self.reporter.debug("MUSICALDOWN_OK link=HD")
                 return href
 
-        self.reporter.debug("MUSICALDOWN_OK link=%s", valid_links[0][1])
         return valid_links[0][0]
 
     def fetch_musicaldown_photos(
@@ -189,33 +175,27 @@ class MusicalDownScraper:
             raise ValueError("MUSICALDOWN_EMPTY_RESPONSE")
 
         if CONVERT_KEYWORD not in html_content.upper():
-            self.reporter.debug("VID_SKIP %s video post detected", post_id)
             return []
 
         photo_links = _extract_photo_urls(html_content)
         if not photo_links:
-            self.reporter.warning("PHOTO_NO_LINKS %s no download buttons", post_id)
+            self.reporter.warning("No photo links found for %s", post_id)
             return []
 
-        self.reporter.debug("PHOTO_FOUND %s slides=%d", post_id, len(photo_links))
         base_dt = datetime.fromtimestamp(create_time, tz=UTC)
         photos: list[PhotoMetadata] = []
 
         for idx, dl_url in enumerate(photo_links):
             slide_dt = base_dt + timedelta(seconds=idx)
             slide_ts = int(slide_dt.timestamp())
-            ts_str = slide_dt.strftime("%Y%m%d_%H%M%S")
-            filename = f"IMG_{ts_str}_s{idx + 1}.jpg"
             photos.append(
-                PhotoMetadata(
+                PhotoMetadata.create(
                     post_id=post_id,
                     slide_index=idx + 1,
-                    url=post_url,
+                    post_url=post_url,
                     download_url=dl_url,
                     create_time=slide_ts,
-                    datetime_obj=slide_dt,
-                    target_filename=filename,
-                    output_path=self.output_dir / filename,
+                    output_dir=self.output_dir,
                 )
             )
 

@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 import time
 from pathlib import Path
@@ -15,13 +14,11 @@ from ttdl.models import PostItem
 from ttdl.scraper import IMAGE_POST_MARKER, MusicalDownScraper
 from ttdl.utils import SNOWFLAKE_TIMESTAMP_SHIFT, extract_video_nodes
 
-log = logging.getLogger(__name__)
-
 DEFAULT_UA: Final[str] = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 Chrome/127.0.0.0 Safari/537.36 Edg/127.0.0.0"
 )
-TIKTOK_ITEM_REGEX: Final[re.Pattern[str]] = re.compile(r"/(?:video|photo)/(\d+)")
+TIKTOK_ITEM_REGEX: Final[re.Pattern[str]] = re.compile(r"/(?:video|photo|story)/(\d+)")
 TIKTOK_USER_REGEX: Final[re.Pattern[str]] = re.compile(r"/@([^/]+)")
 RESOLVER_MAX_RETRIES: Final[int] = 3
 RESOLVER_TIMEOUT: Final[int] = 30
@@ -60,34 +57,36 @@ def _extract_html_hydration(html: str) -> dict[str, dict[str, Any]]:
 class UrlResolver:
     def __init__(self, url: str) -> None:
         self.url = url
-        self.session = requests.Session()
-        self.session.headers.update({"User-Agent": DEFAULT_UA})
 
     def resolve(self) -> dict[str, Any]:
-        resp: requests.Response | None = None
+        final_url = ""
+        resp_text = ""
         last_err: Exception | None = None
 
-        for attempt in range(1, RESOLVER_MAX_RETRIES + 1):
-            try:
-                resp = self.session.get(
-                    self.url, allow_redirects=True, timeout=RESOLVER_TIMEOUT
-                )
-                resp.raise_for_status()
-                break
-            except Exception as e:
-                last_err = e
-                log.warning("UrlResolver attempt %d failed: %s", attempt, e)
-                if attempt < RESOLVER_MAX_RETRIES:
-                    time.sleep(RETRY_BACKOFF_SECONDS)
+        with requests.Session() as session:
+            session.headers.update({"User-Agent": DEFAULT_UA})
 
-        if not resp:
+            for attempt in range(1, RESOLVER_MAX_RETRIES + 1):
+                try:
+                    resp = session.get(
+                        self.url, allow_redirects=True, timeout=RESOLVER_TIMEOUT
+                    )
+                    resp.raise_for_status()
+                    final_url = resp.url
+                    resp_text = resp.text
+                    break
+                except Exception as e:
+                    last_err = e
+                    if attempt < RESOLVER_MAX_RETRIES:
+                        time.sleep(RETRY_BACKOFF_SECONDS)
+
+        if not final_url:
             raise ValueError(
                 f"Failed to resolve URL after {RESOLVER_MAX_RETRIES} attempts: {last_err}"
             )
 
-        final_url = resp.url
         video_id, username = _extract_url_identifiers(final_url)
-        collection = _extract_html_hydration(resp.text)
+        collection = _extract_html_hydration(resp_text)
 
         create_time = 0
         post_type = "video"
@@ -142,7 +141,7 @@ class DirectDownloader:
                 else:
                     dl.download_and_process_video(pi, dl_url)
             else:
-                self.reporter.debug("SKIP %s already exists", video_id)
+                self.reporter.skip("Already exists: %s", pi.output_path.name)
 
         if post_type == "photo":
             photos = scraper.fetch_musicaldown_photos(final_url, video_id, create_time)
@@ -155,20 +154,22 @@ class DirectDownloader:
         overall_failed = False
 
         for url in self.urls:
-            self.reporter.debug("DIRECT Resolving URL %s", url)
+            self.reporter.set_status("Resolving URL")
             try:
                 resolver = UrlResolver(url)
                 data = resolver.resolve()
             except Exception as e:
-                self.reporter.error("RESOLVE_FAIL %s", str(e))
+                self.reporter.clear_status()
+                self.reporter.error("Resolve failed: %s", str(e))
                 overall_failed = True
                 continue
+            finally:
+                self.reporter.clear_status()
 
             username = data["username"]
             self.reporter.info(
-                "RESOLVED user=%s id=%s type=%s",
+                "@%s (%s)",
                 username,
-                data["video_id"],
                 data["post_type"],
             )
 
@@ -182,11 +183,15 @@ class DirectDownloader:
             while failed:
                 failed = False
                 with self.reporter:
+                    self.reporter.set_status(f"Downloading @{username}")
                     try:
                         self._process_item_media(data, output_dir, dl, scraper)
                     except Exception as e:
-                        self.reporter.error("FAIL %s", str(e))
+                        self.reporter.clear_status()
+                        self.reporter.error("Download failed: %s", str(e))
                         failed = True
+                    finally:
+                        self.reporter.clear_status()
 
                 if failed and not self.reporter.ask_retry():
                     overall_failed = True
@@ -195,5 +200,5 @@ class DirectDownloader:
         if overall_failed:
             return 1
 
-        self.reporter.info("EXEC_DONE Direct download complete")
+        self.reporter.success("Done")
         return 0
