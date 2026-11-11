@@ -10,4 +10,4 @@ For educational and personal archiving purposes only.
 License: MIT
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
