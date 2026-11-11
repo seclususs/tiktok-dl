@@ -376,7 +376,6 @@ class LiveDownloader:
     def execute(self) -> int:
         self.reporter.info("@%s (live)", self.target)
         live_out_dir = self.config.downloads_dir / "live" / self.target
-        self.reporter.info("Output: %s", live_out_dir)
 
         try:
             is_live, room_id = self._check_live_status()
@@ -483,7 +482,7 @@ class LiveDownloader:
             if out_file.exists():
                 self.reporter.success("Live stream complete: %s", out_file.name)
             else:
-                self.reporter.info("Stream ended")
+                self.reporter.warning("Stream ended (no data recorded)")
             return 0
         except KeyboardInterrupt:
             tracker.stop()
@@ -501,7 +500,7 @@ class LiveDownloader:
             if out_file.exists():
                 self.reporter.warning("Live stream interrupted: %s", out_file.name)
             else:
-                self.reporter.warning("Stream interrupt")
+                self.reporter.warning("Stream interrupt (no data recorded)")
             return 0
         except Exception as e:
             tracker.stop()

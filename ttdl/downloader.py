@@ -384,7 +384,7 @@ class MediaDownloader:
             "video(s) in output directory. Purge them?"
         )
         if not self.reporter.ask_confirm(prompt, default=False):
-            self.reporter.info("Purge skipped")
+            self.reporter.warning("Purge skipped")
             return
 
         removed = 0

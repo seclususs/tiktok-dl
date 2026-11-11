@@ -352,7 +352,7 @@ def _handle_clean(
     if not getattr(args, "yes", False):
         prompt = f"Purge {mode_str} cache, logs, and temp files?"
         if not reporter.ask_confirm(prompt, default=False):
-            reporter.info("Purge cancelled")
+            reporter.warning("Purge cancelled")
             return EXIT_SUCCESS
 
     files_removed, bytes_freed = clean_cache(
