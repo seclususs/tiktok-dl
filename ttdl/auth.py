@@ -133,7 +133,8 @@ class AuthManager:
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
-            self.reporter.error("Playwright is not installed. Run: pip install .")
+            self.reporter.error("Playwright is not installed")
+            self.reporter.info("Run: pip install .")
             return 1
 
         if is_termux():
@@ -176,7 +177,8 @@ class AuthManager:
                 return 1
             except Exception as e:
                 self.reporter.clear_status()
-                self.reporter.error("Login failed: %s", str(e))
+                err_msg = str(e).splitlines()[0] if str(e) else "unknown error"
+                self.reporter.error("Login failed: %s", err_msg)
                 return 1
             finally:
                 if context:

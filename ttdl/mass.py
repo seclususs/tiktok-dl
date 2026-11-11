@@ -126,9 +126,8 @@ class TikTokDownloader:
         time.sleep(3)
         try:
             browser = p.chromium.connect_over_cdp(CDP_ENDPOINT)
-        except Exception:
-            self.reporter.error("Failed to connect to Android Chrome")
-            raise
+        except Exception as e:
+            raise RuntimeError("Failed to connect to Android Chrome") from e
 
         context = browser.contexts[0]
         if context.pages:
@@ -269,7 +268,7 @@ class TikTokDownloader:
                     skipped += 1
                     continue
 
-                self.reporter.set_status(f"Downloading {idx}/{total}")
+                self.reporter.set_status(f"Downloading {idx}/{total} ({item.video_id})")
                 if not item.is_photo:
                     vd, pd, sd, fl = self._process_single_video(
                         item, do_photo=do_photo, scraper=scraper, dl=dl
@@ -380,7 +379,7 @@ class TikTokDownloader:
             dl.purge_low_res(self.output_dir)
 
         posts = self._fetch_profile_posts(extractor)
-        if posts is None:
+        if not posts:
             return 1
 
         if self.date_filter:

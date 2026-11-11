@@ -19,15 +19,6 @@ from typing import Any, Final
 from ttdl.events import Reporter
 
 PYPI_PLAYWRIGHT_URL: Final[str] = "https://pypi.org/pypi/playwright/json"
-ADB_OFFLINE_BANNER: Final[str] = (
-    "\n"
-    "------------------------------------\n"
-    " Connect Wireless Debugging:\n        "
-    "  1. Enable Wireless Debugging\n      "
-    "  2. adb pair <ip>:<port>\n           "
-    "  3. adb connect <ip>:<port>\n        "
-    "------------------------------------\n"
-)
 
 
 def is_termux() -> bool:
@@ -223,7 +214,10 @@ def _check_adb_status(reporter: Reporter | None) -> None:
 
     stdout = adb_check.stdout
     if "device\n" not in stdout and "\tdevice" not in stdout:
-        _report(reporter, "error", ADB_OFFLINE_BANNER)
+        _report(reporter, "error", "Wireless Debugging is not connected")
+        _report(reporter, "info", "1. Enable Wireless Debugging in Developer Options")
+        _report(reporter, "info", "2. Run: adb pair <ip>:<port>")
+        _report(reporter, "info", "3. Run: adb connect <ip>:<port>")
         sys.exit(1)
 
 

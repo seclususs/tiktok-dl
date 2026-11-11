@@ -477,6 +477,30 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
 
         first_target = targets[0]
 
+        if first_target == "url":
+            if len(targets) > 1:
+                setattr(args, "target", targets[1:])
+                return _handle_url(args, config, reporter)
+
+            reporter.error("Direct download requires URL or file (e.g. ttdl <url>)")
+            reporter.info("Run 'ttdl --help' for usage details")
+            return EXIT_FAILURE
+
+        if first_target in ("batch", "video", "photo", "live"):
+            if len(targets) > 1:
+                if first_target == "video":
+                    setattr(args, "video", True)
+                elif first_target == "photo":
+                    setattr(args, "photo", True)
+                elif first_target == "live":
+                    setattr(args, "live", True)
+
+                first_target = targets[1]
+            else:
+                reporter.error("No target username specified for '%s'", first_target)
+                reporter.info("Run 'ttdl --help' for usage details")
+                return EXIT_FAILURE
+
         if _is_url_or_file_target(first_target):
             setattr(args, "target", targets)
             return _handle_url(args, config, reporter)

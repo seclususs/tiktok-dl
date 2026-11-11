@@ -136,4 +136,4 @@ def detect_browser() -> tuple[str, str]:
     if detected:
         return detected
 
-    raise RuntimeError("NO BROWSER FOUND install Edge or Chrome")
+    raise RuntimeError("No compatible browser found (install Chrome or Edge)")

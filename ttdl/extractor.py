@@ -417,16 +417,16 @@ class ProfileExtractor:
             self._scroll_and_collect(page, videos_dict, cached_ids)
             html_content = page.content()
         except Exception as e:
-            self.reporter.error("Browser error: %s", str(e).split("\n")[0])
-            raise RuntimeError(f"Browser extraction failed: {e}") from e
+            err_msg = str(e).splitlines()[0] if str(e) else "unknown error"
+            raise RuntimeError(f"Browser extraction failed: {err_msg}") from e
 
         self._enrich_from_html(html_content, videos_dict)
         if not videos_dict:
             dump = self.logs_dir / f"error_dump_{self.target_username}.html"
             dump.write_text(html_content, encoding="utf-8")
             self.reporter.error("Profile empty or blocked")
-            self.reporter.error("Dump saved to %s", dump.name)
-            raise RuntimeError("Profile empty or blocked")
+            self.reporter.info("Dump saved to %s", dump.name)
+            return {}
 
         try:
             with open(self.json_path, "w", encoding="utf-8") as f:

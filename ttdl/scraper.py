@@ -30,7 +30,7 @@ def _parse_musicaldown_form(
 ) -> tuple[str, dict[str, str]]:
     form = soup.find("form")
     if not isinstance(form, Tag):
-        raise TypeError("MUSICALDOWN_REJECT Form not found")
+        raise TypeError("Scraper form not found")
 
     action_raw = form.get("action")
     action_str = str(action_raw) if action_raw else ""
@@ -53,7 +53,7 @@ def _parse_musicaldown_form(
 def _check_toast_error(html_content: str) -> None:
     error_match = TOAST_REGEX.search(html_content)
     if error_match:
-        raise ValueError(f"MUSICALDOWN_REJECT {error_match.group(1)}")
+        raise ValueError(f"Scraper rejected: {error_match.group(1)}")
 
 
 def _extract_mp4_links(html_content: str) -> list[tuple[str, str]]:
@@ -140,23 +140,23 @@ class MusicalDownScraper:
                     if attempt == max_retries:
                         dump = self.logs_dir / f"error_md_{attempt}.html"
                         dump.write_text(html_content, encoding="utf-8")
-                        raise ValueError("MUSICALDOWN_MAX_RETRIES_EXHAUSTED") from e
+                        raise ValueError("Scraper max retries reached") from e
 
                     time.sleep(RETRY_SLEEP_SECONDS)
 
-        raise ValueError("MUSICALDOWN_UNREACHABLE")
+        raise ValueError("Scraper service unreachable")
 
     def fetch_musicaldown_link(self, video_url: str) -> str:
         html_content = self._musicaldown_submit(video_url)
         if not html_content:
-            raise ValueError("MUSICALDOWN_EMPTY_RESPONSE")
+            raise ValueError("Empty response from scraper")
 
         if CONVERT_KEYWORD in html_content.upper():
             return IMAGE_POST_MARKER
 
         valid_links = _extract_mp4_links(html_content)
         if not valid_links:
-            raise ValueError("MUSICALDOWN_NO_MP4_BUTTON")
+            raise ValueError("No download link found on page")
 
         for href, text in valid_links:
             if "HD" in text:
@@ -172,7 +172,7 @@ class MusicalDownScraper:
     ) -> list[PhotoMetadata]:
         html_content = self._musicaldown_submit(post_url)
         if not html_content:
-            raise ValueError("MUSICALDOWN_EMPTY_RESPONSE")
+            raise ValueError("Empty response from scraper")
 
         if CONVERT_KEYWORD not in html_content.upper():
             return []

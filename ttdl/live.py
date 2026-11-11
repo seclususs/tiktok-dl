@@ -11,6 +11,7 @@ from typing import Any, Final, cast
 
 from ttdl.config import AppConfig
 from ttdl.events import Reporter
+from ttdl.models import TIMESTAMP_FORMAT, timestamp_to_utc
 
 QUALITY_TIERS: Final[dict[str, int]] = {
     "origion": 1000,
@@ -322,8 +323,7 @@ class LiveDownloader:
         status_code = data.get("status_code", 0)
         if status_code == WAF_RESTRICTED_CODE:
             raise RuntimeError(
-                f"session restricted by WAF ({WAF_RESTRICTED_CODE}). "
-                "Please run 'ttdl login' to authenticate."
+                f"Session restricted by WAF ({WAF_RESTRICTED_CODE}). Run 'ttdl login' to authenticate"
             )
 
         room_data = data.get("data", {})
@@ -337,7 +337,7 @@ class LiveDownloader:
         if not raw_file.exists() or raw_file.stat().st_size == 0:
             return
 
-        self.reporter.info("Finalizing recording")
+        self.reporter.set_status("Finalizing recording")
         remux_cmd = [
             "ffmpeg",
             "-y",
@@ -367,6 +367,8 @@ class LiveDownloader:
                 return
         except Exception:
             pass
+        finally:
+            self.reporter.clear_status()
 
         if raw_file.exists():
             raw_file.replace(final_file)
@@ -407,10 +409,16 @@ class LiveDownloader:
 
         live_out_dir.mkdir(parents=True, exist_ok=True)
         timestamp = int(time.time())
-        out_file = live_out_dir / f"{self.target}_live_{room_id}_{timestamp}.mp4"
-        raw_file = live_out_dir / f"{self.target}_live_{room_id}_{timestamp}.part.mp4"
+        ts_str = timestamp_to_utc(timestamp).strftime(TIMESTAMP_FORMAT)
+        out_file = live_out_dir / f"LIVE_{ts_str}.mp4"
+        raw_file = live_out_dir / f"LIVE_{ts_str}.part.mp4"
 
-        tracker = _SizeTracker(self.target, self.config.downloads_dir, self.reporter)
+        tracker = _SizeTracker(
+            self.target,
+            self.config.downloads_dir,
+            self.reporter,
+            target_file=raw_file,
+        )
         cmd = [
             "ffmpeg",
             "-y",
@@ -471,21 +479,15 @@ class LiveDownloader:
                 self.reporter.error("FFmpeg recording failed%s", err_detail)
                 return 1
 
-            self.reporter.info("Stream ended")
             self._finalize_recording(raw_file, out_file)
-            self.reporter.print_summary(
-                "Live Stream Complete",
-                [
-                    ("Target", f"@{self.target}"),
-                    ("Room ID", str(room_id)),
-                    ("Quality", info_label),
-                    ("Output", str(out_file)),
-                ],
-                style="green",
-            )
+            if out_file.exists():
+                self.reporter.success("Live stream complete: %s", out_file.name)
+            else:
+                self.reporter.info("Stream ended")
             return 0
         except KeyboardInterrupt:
             tracker.stop()
+            self.reporter.clear_status()
             if proc and proc.poll() is None:
                 try:
                     if proc.stdin:
@@ -494,27 +496,23 @@ class LiveDownloader:
                     proc.wait(timeout=3)
                 except Exception:
                     proc.terminate()
-            self.reporter.info("Saving recording")
+
             self._finalize_recording(raw_file, out_file)
-            self.reporter.print_summary(
-                "Live Stream Interrupted",
-                [
-                    ("Target", f"@{self.target}"),
-                    ("Room ID", str(room_id)),
-                    ("Quality", info_label),
-                    ("Output", str(out_file)),
-                ],
-                style="yellow",
-            )
+            if out_file.exists():
+                self.reporter.warning("Live stream interrupted: %s", out_file.name)
+            else:
+                self.reporter.warning("Stream interrupt")
             return 0
         except Exception as e:
             tracker.stop()
+            self.reporter.clear_status()
             if raw_file.exists() and not out_file.exists():
                 self._finalize_recording(raw_file, out_file)
             self.reporter.error("Recording error: %s", str(e))
             return 1
         finally:
             tracker.stop()
+            self.reporter.clear_status()
             if err_file and not err_file.closed:
                 try:
                     err_file.close()
@@ -528,8 +526,15 @@ class LiveDownloader:
 
 
 class _SizeTracker:
-    def __init__(self, target: str, downloads_dir: Path, reporter: Reporter) -> None:
+    def __init__(
+        self,
+        target: str,
+        downloads_dir: Path,
+        reporter: Reporter,
+        target_file: Path | None = None,
+    ) -> None:
         self.out_dir = downloads_dir / "live" / target
+        self.target_file = target_file
         self.reporter = reporter
         self.active = False
         self.worker = threading.Thread(target=self._scan, daemon=True)
@@ -550,14 +555,17 @@ class _SizeTracker:
         while self.active:
             time.sleep(0.5)
             try:
-                items: list[str] = [
-                    os.path.join(self.out_dir, f) for f in os.listdir(self.out_dir)
-                ]
-                if not items:
-                    continue
+                if self.target_file and self.target_file.exists():
+                    b = self.target_file.stat().st_size
+                else:
+                    items: list[str] = [
+                        os.path.join(self.out_dir, f) for f in os.listdir(self.out_dir)
+                    ]
+                    if not items:
+                        continue
 
-                latest = max(items, key=os.path.getmtime)
-                b = os.path.getsize(latest)
+                    latest = max(items, key=os.path.getmtime)
+                    b = os.path.getsize(latest)
             except Exception:
                 continue
 

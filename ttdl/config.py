@@ -341,7 +341,7 @@ class AppConfig:
         if require_ffmpeg:
             for binary in ("ffmpeg", "ffprobe"):
                 if not shutil.which(binary):
-                    raise RuntimeError(f"{binary.upper()} NOT FOUND in system PATH")
+                    raise RuntimeError(f"Required binary '{binary}' not found in PATH")
 
 
 def open_config_editor(cfg_path: Path) -> None:

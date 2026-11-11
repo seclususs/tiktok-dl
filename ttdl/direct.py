@@ -82,7 +82,7 @@ class UrlResolver:
 
         if not final_url:
             raise ValueError(
-                f"Failed to resolve URL after {RESOLVER_MAX_RETRIES} attempts: {last_err}"
+                f"Failed to resolve URL after {RESOLVER_MAX_RETRIES} attempts ({last_err})"
             )
 
         video_id, username = _extract_url_identifiers(final_url)
@@ -167,10 +167,12 @@ class DirectDownloader:
                 self.reporter.clear_status()
 
             username = data["username"]
+            video_id = data["video_id"]
             self.reporter.info(
-                "@%s (%s)",
+                "@%s (%s) (%s)",
                 username,
                 data["post_type"],
+                video_id,
             )
 
             output_dir = self.config.downloads_dir / username
@@ -183,7 +185,7 @@ class DirectDownloader:
             while failed:
                 failed = False
                 with self.reporter:
-                    self.reporter.set_status(f"Downloading @{username}")
+                    self.reporter.set_status(f"Downloading @{username} ({video_id})")
                     try:
                         self._process_item_media(data, output_dir, dl, scraper)
                     except Exception as e:

@@ -1,4 +1,3 @@
-import time
 import types
 from typing import Any, Final, Self
 
@@ -27,7 +26,6 @@ class CliReporter(Reporter):
             console if console is not None else Console(highlight=False, soft_wrap=True)
         )
         self.mode = mode
-        self._last_live_print = 0.0
         self._status: Status | None = None
 
     def _print_msg(self, msg: str, color: str, prefix_symbol: str) -> None:
@@ -79,17 +77,12 @@ class CliReporter(Reporter):
             self._status = None
 
     def on_live_update(self, size: str, speed: str) -> None:
-        now = time.time()
-        if now - self._last_live_print >= 5.0:
-            self._last_live_print = now
-            text = Text()
-            text.append("[*]", style="bold cyan")
-            text.append(f" Live: {size} ({speed})", style="bright_white")
-            self.console.print(text)
+        self.set_status(f"Live: {size} ({speed})")
 
     def print_summary(
         self, title: str, stats: list[tuple[str, str]], style: str = "cyan"
     ) -> None:
+        self.clear_status()
         t = Text()
         t.append("[*]", style=f"bold {style}")
         t.append(f" {title}:", style="bright_white")
